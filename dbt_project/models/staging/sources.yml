@@ -1,0 +1,8 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: raw_clinical_trials
+        description: "Datos crudos de ClinicalTrials.gov API v2 (2015-2024, fases I-IV)."

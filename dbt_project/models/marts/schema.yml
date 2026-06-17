@@ -1,0 +1,82 @@
+version: 2
+
+models:
+  - name: stg_clinical_trials
+    description: "Staging model for raw clinical trials data from ClinicalTrials.gov API v2."
+    columns:
+      - name: nct_id
+        description: "Unique ClinicalTrials.gov identifier"
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_date
+    description: "Calendar dimension table (2010-01-01 to 2026-12-31)."
+    columns:
+      - name: date_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_status
+    description: "Trial status dimension with completion/abandonment flags."
+    columns:
+      - name: status_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_phase
+    description: "Clinical trial phase dimension."
+    columns:
+      - name: phase_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_sponsor
+    description: "Sponsor dimension (class + name)."
+    columns:
+      - name: sponsor_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_condition
+    description: "Medical condition / therapeutic area dimension."
+    columns:
+      - name: condition_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_country
+    description: "Country dimension."
+    columns:
+      - name: country_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: dim_intervention_type
+    description: "Intervention type dimension (drug, device, etc.)."
+    columns:
+      - name: intervention_type_id
+        data_tests:
+          - not_null
+          - unique
+
+  - name: fct_clinical_trials
+    description: "Fact table: one row per clinical trial with metrics and dimension FKs."
+    columns:
+      - name: nct_id
+        data_tests:
+          - not_null
+          - unique
+      - name: status_id
+        data_tests:
+          - not_null
+      - name: enrollment_count
+        description: "Number of enrolled participants. Some trials do not report this."
+      - name: duration_days
+        description: "Trial duration in days (completion_date - start_date)."

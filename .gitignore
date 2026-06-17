@@ -1,0 +1,12 @@
+.venv/
+data/
+*.duckdb
+*.duckdb.wal
+__pycache__/
+.env
+.agents/
+logs/
+outputs/
+AGENTS.md
+opencode.json
+docs/
