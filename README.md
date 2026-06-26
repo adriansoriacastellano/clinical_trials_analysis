@@ -322,4 +322,4 @@ clinical_trials_analysis/
 Data Analytics · Analytics Engineering  
 [GitHub](https://github.com/adriansoriacastellano)
 
-*Background in Neuroscience (BSc + MSc). Transitioning into Data Analytics and Analytics Engineering.*
+*Background in Neuroscience (BSc + MSc). Transitioning into Data Analytics and Analytics Engineering. Currently building analytics engineering projects. Open to Data Analyst and Analytics Engineer roles.*
