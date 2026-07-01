@@ -9,5 +9,5 @@ logs/
 outputs/
 AGENTS.md
 opencode.json
-docs/
+docs/*
 !docs/SLA.md
