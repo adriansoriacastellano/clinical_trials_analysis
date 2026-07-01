@@ -15,8 +15,8 @@ QUERY_PARAMS = {
     "format": "json",
     "pageSize": PAGE_SIZE,
     "query.term": (
-        "AREA[StartDate]RANGE[01/01/2015, 12/31/2024] AND "
-        "AREA[Phase]PHASE1 OR AREA[Phase]PHASE2 OR AREA[Phase]PHASE3 OR AREA[Phase]PHASE4"
+        "AREA[StartDate]RANGE[01/01/2010, 12/31/2024] AND "
+        "(AREA[Phase]PHASE1 OR AREA[Phase]PHASE2 OR AREA[Phase]PHASE3 OR AREA[Phase]PHASE4)"
     ),
     "countTotal": "true",
 }
@@ -148,7 +148,7 @@ def append_rows_to_csv(rows, write_header):
             f.write(",".join(safe_csv_value(row.get(c)) for c in COLUMNS) + "\n")
 
 def main():
-    print("Iniciando extraccion de ClinicalTrials.gov API v2 (2015-2024, fases I-IV)...")
+    print("Iniciando extraccion de ClinicalTrials.gov API v2 (2010-2024, fases I-IV)...")
 
     checkpoint = load_checkpoint()
     if checkpoint:

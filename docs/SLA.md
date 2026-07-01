@@ -2,7 +2,7 @@
 
 ## Sección A — Requerimientos de Negocio (completar en Fase 1)
 
-* **Objetivo Principal:** Identificar qué factores — fase del ensayo, tipo de patrocinador, área terapéutica, tamaño y país — determinan si un ensayo clínico registrado en ClinicalTrials.gov llega a completarse o se abandona/suspende.
+* **Objetivo Principal:** Identificar qué factores — fase del ensayo, tipo de intervención, tipo de patrocinador, área terapéutica, tamaño y país — determinan si un ensayo clínico registrado en ClinicalTrials.gov llega a completarse o se abandona/suspende.
 
 * **Origen de los Datos:** API pública de ClinicalTrials.gov v2. Endpoint REST sin autenticación. URL base: `https://clinicaltrials.gov/api/v2/studies`. Ingesta única para el período 2010-2024.
 
@@ -13,9 +13,11 @@
   * **Tasa de abandono:** `COUNT(ensayos_terminados + suspendidos + retirados) / COUNT(total_ensayos)`
   * **Duración media del ensayo:** `AVG(fecha_fin_real - fecha_inicio_real)` en días, solo para ensayos completados
   * **Tamaño medio del ensayo:** `AVG(enrollment_count)`
+  * **Bandas de tamaño del ensayo (enrollment):** `<50` · `50-99` · `100-199` · `200-499` · `500-999` · `1000+` — usadas para el análisis de tasa de finalización por tamaño
   * **Tasa de finalización por fase:** `COUNT(completados_fase_X) / COUNT(total_fase_X)` para fases I, II, III, IV
-  * **Tasa de finalización por tipo de patrocinador:** `COUNT(completados_sponsor_tipo) / COUNT(total_sponsor_tipo)` (Industry, NIH, Other)
-  * **Tasa de finalización por área terapéutica:** Para las top 10 áreas con más ensayos
+  * **Tasa de finalización por tipo de patrocinador:** `COUNT(completados_sponsor_tipo) / COUNT(total_sponsor_tipo)` (Industry, Individual, Federal, NIH, Network, Other, Other Government)
+  * **Tasa de finalización por tipo de intervención:** `COUNT(completados_intervention_type) / COUNT(total_intervention_type)` (Drug, Biological, Device, Behavioral, Dietary Supplement, Combination Product, Diagnostic Test, Procedure, Genetic, Radiation, Other)
+  * **Tasa de finalización por área terapéutica:** Para las top 5 áreas con más ensayos (umbral mínimo ≥1,000 ensayos, excluyendo condiciones no médicas como "healthy volunteer")
   * **Distribución de estados:** `COUNT` por cada `overall_status` (COMPLETED, TERMINATED, WITHDRAWN, SUSPENDED, etc.)
 
 * **Frecuencia de actualización:** Proyecto de análisis histórico. Ingesta única para el período 2010-2024. No requiere actualización periódica.
@@ -24,7 +26,7 @@
 
 ## Sección B — Arquitectura Técnica (completar en Fase 3, antes de marts)
 
-* **Tabla Raw inspeccionada:** `raw.raw_clinical_trials` — 188,687 filas, 28 columnas. Fuente: API pública ClinicalTrials.gov v2 (sin autenticación).
+* **Tabla Raw inspeccionada:** `raw.raw_clinical_trials` — 137,556 filas, 28 columnas. Fuente: API pública ClinicalTrials.gov v2 (sin autenticación).
 
 * **Catálogo de columnas raw:**
   | Columna | Tipo | Contenido |
@@ -42,9 +44,11 @@
   | `intervention_types` | VARCHAR | JSON array de tipos de intervención |
   | `disposition_events` | VARCHAR | JSON array de eventos de disposición |
 
-* **Esquema esperado de tablas marts:**
-  * Tabla de hechos (`fct_clinical_trials`): Una fila por ensayo clínico (NCT ID), con métricas calculadas y claves foráneas a dimensiones.
-  * Tablas de dimensiones (`dim_phase`, `dim_sponsor_type`, `dim_therapeutic_area`, `dim_country`, `dim_status`): Entidades descriptivas.
+* **Esquema real de tablas marts:**
+  * **Tabla de hechos** (`fct_clinical_trials`): Una fila por ensayo clínico (NCT ID), con métricas calculadas y claves foráneas a dimensiones.
+  * **Tablas de dimensiones:** `dim_date`, `dim_status`, `dim_phase`, `dim_sponsor`, `dim_condition` (con columnas `condition_name_raw` y `condition_name_normalized` para trazabilidad), `dim_country`, `dim_intervention_type`.
+  * **Tablas puente (N:N):** `brg_trial_phase`, `brg_trial_condition`, `brg_trial_country`, `brg_trial_intervention` — necesarias porque un mismo ensayo puede tener múltiples fases, condiciones, países y tipos de intervención asociados.
+  * **Capa intermedia:** `int_condition_normalized` — normaliza variantes ortográficas de nombres de condición vía seed `condition_normalization.csv` (3,771 mappings raw → normalized).
 
 * **Criterio de Tie-out:** El conteo total de ensayos por `overall_status` en DuckDB debe coincidir exactamente con el visualizado en Power BI.
 
@@ -57,3 +61,4 @@
 3. ¿Los ensayos de la industria farmacéutica completan más que los académicos?
 4. ¿Qué áreas terapéuticas concentran más abandonos?
 5. ¿El tamaño del ensayo correlaciona con la probabilidad de completarse?
+6. ¿Qué tipos de intervención (fármaco, dispositivo, conducta...) presentan mayor tasa de finalización o abandono?

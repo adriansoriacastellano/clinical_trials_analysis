@@ -43,12 +43,16 @@ models:
           - unique
 
   - name: dim_condition
-    description: "Medical condition / therapeutic area dimension."
+    description: "Medical condition / therapeutic area dimension with normalized names."
     columns:
       - name: condition_id
         data_tests:
           - not_null
           - unique
+      - name: condition_name_raw
+        description: "Original condition name from ClinicalTrials.gov."
+      - name: condition_name_normalized
+        description: "Normalized condition name (deduplicated via seed)."
 
   - name: dim_country
     description: "Country dimension."
@@ -80,3 +84,13 @@ models:
         description: "Number of enrolled participants. Some trials do not report this."
       - name: duration_days
         description: "Trial duration in days (completion_date - start_date)."
+
+  - name: brg_trial_intervention
+    description: "Bridge table linking clinical trials to intervention types."
+    columns:
+      - name: nct_id
+        data_tests:
+          - not_null
+      - name: intervention_type_id
+        data_tests:
+          - not_null

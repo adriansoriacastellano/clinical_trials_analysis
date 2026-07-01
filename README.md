@@ -2,7 +2,7 @@
 
 **What determines whether a clinical trial completes or is abandoned?**
 
-An end-to-end data analytics project exploring completion and abandonment patterns across 188,687 clinical trials registered in ClinicalTrials.gov (Phases I–IV, 2015–2024).
+An end-to-end data analytics project exploring completion and abandonment patterns across 137,556 clinical trials registered in ClinicalTrials.gov (Phases I–IV, 2010–2024).
 
 Built as a portfolio project to demonstrate a full analytics pipeline: API ingestion → data warehouse → dimensional modelling → interactive dashboard.
 
@@ -23,13 +23,13 @@ Built as a portfolio project to demonstrate a full analytics pipeline: API inges
 
 ## Business Context
 
-Clinical trial completion is one of the most resource-intensive problems in drug development. A trial that is abandoned after years of execution represents not only wasted investment but a delayed or missed treatment for patients. Understanding which factors — trial phase, sponsor type, therapeutic area, enrollment size, and geography — are associated with higher abandonment rates has direct implications for portfolio planning in pharma, biotech, and CROs.
+Clinical trial completion is one of the most resource-intensive problems in drug development. A trial that is abandoned after years of execution represents not only wasted investment but a delayed or missed treatment for patients. Understanding which factors — trial phase, intervention type, sponsor type, therapeutic area, enrollment size, and geography — are associated with higher abandonment rates has direct implications for portfolio planning in pharma, biotech, and CROs.
 
 **Central question:**
-> Which factors — trial phase, sponsor type, therapeutic area, enrollment size, and country — determine whether a clinical trial registered in ClinicalTrials.gov reaches completion or is abandoned/suspended?
+> Which factors — trial phase, intervention type, sponsor type, therapeutic area, enrollment size, and country — determine whether a clinical trial registered in ClinicalTrials.gov reaches completion or is abandoned/suspended?
 
-**Data source:** [ClinicalTrials.gov API v2](https://clinicaltrials.gov/data-api/api) (public, no authentication required)  
-**Scope:** Phases I–IV · 2015–2024 · 188,687 trials
+**Data source:** [ClinicalTrials.gov API v2](https://clinicaltrials.gov/data-api/api) (public, no authentication required)
+**Scope:** Phases I–IV · 2010–2024 · 137,556 trials
 
 ---
 
@@ -45,13 +45,23 @@ Three custom flags were derived from ClinicalTrials.gov's official status vocabu
 | `is_abandoned` | `Terminated` OR `Withdrawn` OR `Suspended` | Trials that ended without reaching their planned endpoint — an analytical decision reflecting trials with no planned outcome |
 | `is_concluded` | `is_completed OR is_abandoned` | Trials with a definitive outcome, used as the denominator for the temporal analysis |
 
+### Data Quality — Bug Discovery & Correction
+
+During a review of the extraction pipeline, two data quality issues were identified and fixed:
+
+1. **API query precedence bug.** The original extraction filter, `StartDate AND Phase1 OR Phase2 OR Phase3 OR Phase4`, was evaluated by the API as `(StartDate AND Phase1) OR Phase2 OR Phase3 OR Phase4` — meaning trials in Phases II, III, and IV were pulled in with **no date filter applied at all**. This inflated the dataset to 188,687 trials, including tens of thousands outside the intended 2010–2024 window. The fix was a one-character change: `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)`.
+
+2. **Missing range validation in staging.** The staging model validated date *format* (`YYYY-MM-DD`) but not date *range*, so malformed upstream data could silently pass through. A second barrier was added: an explicit `BETWEEN '2010-01-01' AND '2024-12-31'` check in `stg_clinical_trials`.
+
+After both fixes, re-extraction produced the correct, in-scope dataset: **137,556 trials** (down from 188,687). This is documented here rather than silently corrected because it materially changed one of the analytical findings below (see Finding 2) — a reminder that a plausible-looking result is not the same as a correct one, and that independent tie-out (DuckDB ↔ Power BI ↔ a standalone EDA notebook) is what catches this kind of error.
+
 ### Temporal Bias — Maturity Effect
 
-A raw completion rate chart shows a drop from ~82% (2015) to ~78% (2024). This is **not a real deterioration** — it is a maturity effect: trials registered in 2023–2024 have not had enough time to complete. They remain in active or recruiting status, pulling down the raw rate artificially.
+A raw completion rate chart shows a visible dip in the middle of the period. This is **not a real deterioration** — it is a maturity effect: trials registered more recently have not had enough time to complete. They remain in active or recruiting status, pulling down the raw rate artificially.
 
-To correct for this, the temporal analysis uses **Completion Rate (Concluded)** = Completed ÷ (Completed + Abandoned), which removes all still-active trials from the denominator. The corrected rate oscillates between 70–85% across the entire period with no meaningful downward trend, confirming that the apparent decline is a statistical artefact, not a real signal.
+To correct for this, the temporal analysis uses **Completion Rate (Concluded)** = Completed ÷ (Completed + Abandoned), which removes all still-active trials from the denominator. The corrected rate oscillates between roughly 70% and 85% across the entire period, confirming that the apparent dip is a statistical artefact, not a real signal.
 
-Both metrics are visible in the dashboard: the raw rate (55.9%) as a global KPI reflecting the full dataset as extracted, and the corrected rate (80.5%) for the temporal trend line.
+Both metrics are visible in the dashboard: the raw rate (55.2%) as a global KPI reflecting the full dataset as extracted, and the corrected rate (79.4%) for the temporal trend line.
 
 ### Enrollment Bands
 
@@ -59,13 +69,16 @@ Enrollment was categorised into six bands to enable comparison across trial size
 
 `<50` · `50–99` · `100–199` · `200–499` · `500–999` · `1,000+`
 
+### Condition Normalization
+
+Free-text condition fields from the API contain orthographic variants of the same underlying condition (e.g. "COVID-19" vs "Covid19"). A dbt seed (`condition_normalization.csv`, 3,771 mappings) maps raw values to a canonical `condition_name_normalized`, implemented as a new intermediate model (`int_condition_normalized`). Both `condition_name_raw` and `condition_name_normalized` are kept in `dim_condition` for traceability. This normalization covers the variants detected by an automated matching pass; full manual review of all ~45,000 unique conditions was out of scope (see Limitations).
+
 ### Thresholds for Statistical Representativeness
 
 Rates computed from very small sample sizes are not reliable. The following minimum thresholds were applied:
 
-- Therapeutic areas: ≥ 1,500 trials
-- Country bar chart: ≥ 15,000 trials
-- Country scatter: ≥ 1,000 trials
+- Therapeutic areas: ≥ 1,000 trials (excluding non-medical "healthy volunteer" conditions, filtered by text match)
+- Country bar chart: ≥ 10,500 trials
 
 ---
 
@@ -76,32 +89,34 @@ ClinicalTrials.gov API v2
          │
          ▼
   Python (extract_api_data.py)
-  ├── Incremental saving every 3 pages
-  ├── Checkpoint/resume logic (WSL2 stability)
-  └── 188,687 records → raw JSON
+  ├── Incremental saving with checkpoint/resume (WSL2 stability)
+  ├── Date filter: (StartDate) AND (Phase1 OR Phase2 OR Phase3 OR Phase4)
+  └── 137,556 records → raw JSON
          │
          ▼
   DuckDB (dwh_dev.duckdb)
   └── raw.raw_clinical_trials (28 columns)
          │
          ▼
-  dbt Core (12 models · 21/21 tests PASS)
-  ├── Staging: stg_clinical_trials (view)
-  ├── Fact:    fct_clinical_trials (188,687 rows)
-  ├── Dims:    dim_date · dim_status · dim_phase
-  │            dim_sponsor · dim_condition · dim_country
-  └── Bridges: brg_trial_phase · brg_trial_condition · brg_trial_country
+  dbt Core 1.11.11 / dbt-duckdb 1.10.1 (14 models · 1 seed · 38/38 tests PASS)
+  ├── Staging:      stg_clinical_trials (+ date range validation)
+  ├── Intermediate: int_condition_normalized
+  ├── Fact:         fct_clinical_trials (137,556 rows)
+  ├── Dims:         dim_date · dim_status · dim_phase · dim_sponsor
+  │                 dim_condition · dim_country · dim_intervention_type
+  └── Bridges:      brg_trial_phase · brg_trial_condition
+                     brg_trial_country · brg_trial_intervention
          │
          ▼
   Parquet export (Python/DuckDB → Windows filesystem)
          │
          ▼
   Power BI Desktop
-  ├── Semantic model (10 active relationships)
+  ├── Semantic model (13 relationships, 12 active + 1 inactive)
   ├── 15 DAX measures
   └── 3-page interactive dashboard
 
-> **EDA:** Before building the dashboard, a full exploratory analysis was conducted in `notebooks/01_exploration_SLA.ipynb`. The notebook is executed with all outputs included and documents the analytical path from raw data to the five SLA questions answered.
+> **EDA:** Before building the dashboard, a full exploratory analysis was conducted in `notebooks/01_exploration_SLA.ipynb`. Every metric is computed independently against DuckDB — not against Power BI — and compared to the dashboard values as a tie-out check, catching discrepancies rather than assuming the dashboard is correct by default.
 ```
 
 **Stack:**
@@ -112,6 +127,7 @@ ClinicalTrials.gov API v2
 | DuckDB | Local data warehouse |
 | dbt Core | Transformations, data quality tests, lineage |
 | Power BI Desktop | Dashboard and semantic model |
+| DBeaver | Independent SQL verification of dashboard numbers |
 | Git + GitHub | Version control and public portfolio |
 
 > **Note on Power BI connectivity:** Mart tables were exported to Parquet files on the Windows filesystem rather than connecting Power BI directly to the DuckDB database. The primary reason was file size: the full DuckDB file (`dwh_dev.duckdb`) weighs ~4 GB, while the exported Parquet files for the mart layer total a fraction of that. The DuckDB database remains the source of truth; the Parquet files are a lightweight transport layer for the reporting tier.
@@ -124,49 +140,106 @@ ClinicalTrials.gov API v2
 
 | Metric | Value |
 |---|---|
-| Total trials | 188,687 |
-| Completion Rate | 55.9% |
-| Abandonment Rate | 13.5% |
-| Completion Rate (Concluded) | 80.5% |
-| Avg. enrollment | 344 participants |
-| Avg. duration (completed trials) | 1,048 days (~2.9 years) |
+| Total trials | 137,556 |
+| Completion Rate | 55.2% |
+| Abandonment Rate | 14.3% |
+| Completion Rate (Concluded) | 79.4% |
+| Abandonment Rate (Concluded) | 20.6% |
+| Avg. enrollment | 305 participants |
+| Avg. duration (completed trials) | 839 days (~2.3 years) |
 
 ---
 
 ### Finding 1 — Phase II is the riskiest phase
 
-Phase II has the highest abandonment rate (15.5%) and the lowest completion rate (50.4%) of all phases. Phase III and Phase IV both achieve ~60% completion. This aligns with the known "Phase II valley of death" in drug development: early signals of safety (Phase I) are promising, but efficacy proof is where most programmes fail.
+Phase II has the lowest completion rate (46.8%) and the highest abandonment rate (17.0%) of all phases. Phase I, III, and IV all sit meaningfully higher. This aligns with the known "Phase II valley of death" in drug development: early signals of safety (Phase I) are promising, but efficacy proof is where most programmes fail.
 
 | Phase | Completion Rate | Abandonment Rate |
 |---|---|---|
-| Phase I | 53.6% | 14.5% |
-| Phase II | 50.4% | 15.5% |
-| Phase III | 60.2% | 11.5% |
-| Phase IV | 59.2% | 11.5% |
+| Phase I | 61.0% | 14.2% |
+| Phase II | 46.8% | 17.0% |
+| Phase III | 55.6% | 12.6% |
+| Phase IV | 56.1% | 12.0% |
 
 ---
 
-### Finding 2 — NIH outperforms Industry in completion rate
+### Finding 2 — Industry outperforms NIH in completion rate (a finding that reversed after the bug fix)
 
-The NIH leads all sponsor types with a 68.8% completion rate, higher than Industry (64.3%). This is counterintuitive — one might expect industry sponsors, with commercial pressure and tighter programme governance, to have higher completion rates. A plausible explanation is survivorship bias: NIH-funded trials may be smaller and more focused, whereas industry portfolios include a larger proportion of exploratory Phase II programmes that are designed to be stopped early if efficacy signals are weak.
+With the corrected dataset, **Industry-sponsored trials complete at a substantially higher rate (67.5%) than NIH-sponsored trials (52.7%)** — a 15-point gap in the opposite direction from what the contaminated dataset had suggested. This is a useful example of why the bug-fix story above matters: the date-filter bug disproportionately affected which trials were included per sponsor type, and correcting it changed not just the magnitude but the *direction* of this finding.
+
+| Sponsor | Completion Rate | Abandonment Rate |
+|---|---|---|
+| Industry | 67.5% | 14.6% |
+| Individual | 61.7% | 15.0% |
+| Federal | 57.1% | 17.3% |
+| NIH | 52.7% | 19.5% |
+| Network | 49.1% | 13.1% |
+| Other | 46.2% | 14.3% |
+| Other Government | 43.7% | 5.7% |
+
+A plausible explanation: industry portfolios are managed under stronger commercial and governance pressure to see a trial through, whereas NIH-funded research includes a larger share of exploratory, hypothesis-generating studies that are more readily discontinued when early signals are weak.
 
 ---
 
-### Finding 3 — Small trials fail disproportionately
+### Finding 3 — Very small trials have a sharply elevated abandonment risk
 
-Trials with fewer than 50 participants have a ~25% abandonment rate — five times higher than large trials (≥1,000 participants, ~5%). The relationship is monotonic: completion rate increases consistently with enrollment band. This likely reflects both resource constraints (underfunded small trials) and statistical design issues (insufficient power to detect effects, leading to early termination).
+The relationship between enrollment size and outcome is not a smooth gradient — it is a cliff. Trials with fewer than 50 participants abandon at **24.5%**, roughly 4–6x the rate of every other enrollment band, which all cluster between 4.1% and 6.1%. Completion rate itself is fairly flat across bands (52.7%–61.6%), so the story here is specifically about abandonment risk concentrated in the smallest trials — consistent with underfunded or underpowered studies being cut short.
+
+| Enrollment Band | Completion Rate | Abandonment Rate |
+|---|---|---|
+| <50 | 52.7% | 24.5% |
+| 50–99 | 58.2% | 6.1% |
+| 100–199 | 56.0% | 5.2% |
+| 200–499 | 56.6% | 5.0% |
+| 500–999 | 61.6% | 4.1% |
+| 1,000+ | 58.4% | 4.7% |
 
 ---
 
-### Finding 4 — China is a geographic outlier
+### Finding 4 — China is a geographic outlier; Germany leads on completion
 
-China has a 30.2% raw completion rate — among the lowest of major trial countries. However, its abandonment rate is only 4.6%. The gap is explained by a high volume of trials in "Unknown" status, which are neither completed nor abandoned — they simply have no reported outcome. This is not evidence of trial failure; it reflects a data completeness issue in ClinicalTrials.gov reporting for Chinese trials. Germany leads in completion rate among major countries.
+Among the four largest trial-hosting countries, China has by far the lowest completion rate (33.3%) — yet also the lowest abandonment rate (5.3%). The gap is explained by a large volume of trials sitting in "Unknown" status: neither completed nor abandoned, simply unreported. This is a data completeness issue in ClinicalTrials.gov reporting for Chinese trials, not evidence that trials are failing. Germany leads in completion rate (64.7%) among the major countries, despite having the smallest trial volume of the four.
+
+| Country | Total Trials | Completion Rate | Abandonment Rate |
+|---|---|---|---|
+| United States | 56,724 (58.1%) | 59.1% | 19.8% |
+| China | 19,201 (19.7%) | 33.3% | 5.3% |
+| Canada | 10,977 (11.2%) | 58.4% | 15.7% |
+| Germany | 10,754 (11.0%) | 64.7% | 15.0% |
 
 ---
 
-### Finding 5 — HIV and Asthma are high-completion areas; oncology shows more variation
+### Finding 5 — The highest-volume therapeutic areas show moderate, not high, completion
 
-Among therapeutic areas with ≥1,500 trials, HIV Infections and Asthma show the highest completion rates (~80%). Cancer indications (Prostate Cancer, Breast Cancer) show considerably more abandonment (~15–20%), reflecting the complexity and duration of oncology programmes.
+Among conditions with ≥1,000 trials (excluding non-medical "healthy volunteer" studies), the five largest by volume are COVID-19 and four major cancer indications. None of them are high-completion outliers — all sit in a 32%–47% band, meaningfully below the 55.2% dataset-wide average, and abandonment runs high across the board (17.6%–25.5%). This reflects both the complexity and duration typical of large oncology programmes and the disruption COVID-19 caused to trial continuity.
+
+| Condition | Completion Rate | Abandonment Rate |
+|---|---|---|
+| COVID-19 | 47.0% | 25.5% |
+| Prostate Cancer | 44.4% | 19.1% |
+| Multiple Myeloma | 40.4% | 21.3% |
+| Breast Cancer | 38.6% | 17.6% |
+| Non-Small Cell Lung Cancer | 32.4% | 20.1% |
+
+---
+
+### Finding 6 — Intervention type shows the widest completion spread of any factor
+
+Intervention type produces the largest range of any single factor in this analysis: from 28.6% (Radiation) to 64.0% (Behavioral) — a 35-point spread, wider than Phase, Sponsor, or Country. Behavioral and Dietary Supplement interventions complete most reliably; Radiation and Genetic interventions show the highest abandonment. Drug trials, the largest category by far (over 80% of all trials), sit close to the dataset average.
+
+| Intervention Type | Completion Rate | Abandonment Rate |
+|---|---|---|
+| Behavioral | 64.0% | 9.6% |
+| Dietary Supplement | 62.5% | 9.7% |
+| Drug | 55.4% | 15.0% |
+| Other | 54.6% | 16.0% |
+| Biological | 53.7% | 14.9% |
+| Device | 52.6% | 14.2% |
+| Combination Product | 42.6% | 12.3% |
+| Diagnostic Test | 39.5% | 13.7% |
+| Procedure | 39.0% | 15.6% |
+| Genetic | 33.0% | 18.8% |
+| Radiation | 28.6% | 16.5% |
 
 ---
 
@@ -176,43 +249,43 @@ Among therapeutic areas with ≥1,500 trials, HIV Infections and Asthma show the
 
 ![Overview](assets/images/clinical_trials_analysis_overview.png)
 
-The Overview page shows global KPIs, the corrected temporal trend (Completion Rate by Year using the Concluded denominator), and the distribution of all trials by status. The dual completion metrics — raw (55.9%) and concluded (80.5%) — are shown side by side to make the maturity effect immediately visible to any reader.
+The Overview page shows global KPIs, the corrected temporal trend (Completion Rate by Year using the Concluded denominator, with 70% and 85% reference lines), and the distribution of all trials by status.
 
 ---
 
-### Factors I: Phase, Sponsor & Enrollment
+### Factors I: Phase, Intervention & Sponsor
 
 ![Factors I](assets/images/clinical_trials_analysis_factors_i.png)
 
-This page decomposes completion and abandonment rates by the three structural factors: trial phase, sponsor type, and enrollment size. Each chart shows both rates simultaneously to allow relative comparison.
+This page decomposes completion and abandonment rates by trial phase, intervention type, and sponsor type — the three factors most tied to how a trial is designed and run. Each chart shows both rates simultaneously for direct comparison.
 
 ---
 
-### Factors II: Therapeutic Area & Country
+### Factors II: Enrollment, Condition & Country
 
 ![Factors II](assets/images/clinical_trials_analysis_factors_ii.png)
 
-This page covers therapeutic areas (filtered to conditions with ≥1,500 trials, excluding healthy volunteer studies) and geography. The donut chart highlights the geographic concentration of global clinical research: the United States accounts for 53% of all trials in the dataset.
+This page covers trial size (enrollment bands), therapeutic area (filtered to conditions with ≥1,000 trials, excluding healthy-volunteer studies), and geography. The donut chart highlights the geographic concentration of global clinical research: the United States accounts for 58% of all trials in the dataset.
 
 ---
 
 ## Known Limitations & Future Work
 
-### 1. Duplicate condition names in `dim_condition`
+### 1. Condition normalization is not exhaustive
 
-Free-text condition fields from the API contain orthographic variations: "COVID-19", "COVID", and "Covid19" are registered as separate conditions; "Crohn Disease" and "Crohn's Disease" similarly. This inflates the number of distinct conditions (~53,000) and may slightly alter rankings in the therapeutic area analysis.
+The normalization seed covers ~3,771 raw-to-canonical mappings detected via automated matching, but the full space of ~45,000 unique raw condition strings has not been manually reviewed. Some orthographic or naming variants may still be treated as distinct conditions.
 
-**Proposed solution:** A dbt seed file with a normalisation dictionary mapping variant spellings to a canonical term. Not implemented in this version to keep the project scope contained.
+**Proposed solution:** Incremental manual review of the highest-volume unmapped conditions, prioritized by trial count.
 
 ### 2. `primary_purpose` field missing (API v2 migration)
 
 The `primary_purpose` field (Treatment / Prevention / Diagnostic / etc.) is 100% null in the extracted data. This field was moved to a different location in ClinicalTrials.gov API v2 after the registry migration. It would be a valuable analytical dimension and is a candidate for a future extraction update.
 
-### 3. `dim_intervention_type` not connected to the fact table
+### 3. "Healthy volunteer" exclusion relies on a text filter, not a structural flag
 
-The intervention type dimension (Drug / Device / Biological / etc.) was built in dbt but has no bridge table connecting it to `fct_clinical_trials`, as trials can have multiple intervention types. The dimension was excluded from the Power BI model.
+Conditions containing "healthy" are excluded from the therapeutic area analysis via a text-match filter applied in the Power BI visual, rather than a proper dimensional flag.
 
-**Proposed solution:** Add `brg_trial_intervention` as a bridge table in dbt, re-export to Parquet, and add the corresponding visuals to the dashboard.
+**Proposed solution:** Add an `is_medical_condition` boolean column to `int_condition_normalized` in dbt, so the exclusion logic lives in the transformation layer instead of the reporting layer.
 
 ### 4. Parquet transport layer vs. direct ODBC connection
 
@@ -248,19 +321,20 @@ pip install -r requirements.txt
 python src/extract_api_data.py
 ```
 
-This script connects to the ClinicalTrials.gov API v2 (no authentication required), applies filters for Phases I–IV and the 2015–2024 registration window, and writes the results incrementally to `data/dwh_dev.duckdb`. The extraction runs for ~45–60 minutes and supports checkpointing: if interrupted, it can be resumed from the last saved page.
+This script connects to the ClinicalTrials.gov API v2 (no authentication required), applies filters for Phases I–IV within a correctly-parenthesized date window `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)` covering 2010–2024, and writes the results incrementally to `data/dwh_dev.duckdb`. The extraction supports checkpointing: if interrupted, it can be resumed from the last saved page.
 
-Expected output: **~188,687 trials** in `raw.raw_clinical_trials`.
+Expected output: **137,556 trials** in `raw.raw_clinical_trials`.
 
 ### Step 2 — Run dbt transformations
 
 ```bash
 cd dbt_project
+dbt seed
 dbt run
 dbt test
 ```
 
-Expected: 12 models built, **21/21 tests passing**.
+Expected: 14 models built, 1 seed loaded (`condition_normalization`, 3,771 rows), **38/38 tests passing**.
 
 ### Step 3 — Export to Parquet and build the dashboard
 
@@ -273,9 +347,10 @@ con = duckdb.connect("data/dwh_dev.duckdb")
 
 tables = [
     "fct_clinical_trials",
-    "dim_date", "dim_status", "dim_phase",
-    "dim_sponsor", "dim_condition", "dim_country",
-    "brg_trial_phase", "brg_trial_condition", "brg_trial_country"
+    "dim_date", "dim_status", "dim_phase", "dim_sponsor",
+    "dim_condition", "dim_country", "dim_intervention_type",
+    "brg_trial_phase", "brg_trial_condition",
+    "brg_trial_country", "brg_trial_intervention"
 ]
 
 for table in tables:
@@ -297,18 +372,21 @@ Then in Power BI Desktop:
 clinical_trials_analysis/
 ├── dbt_project/
 │   ├── models/
-│   │   ├── staging/         # stg_clinical_trials
-│   │   └── marts/           # fct + dims + bridges
+│   │   ├── staging/         # stg_clinical_trials (+ date range validation)
+│   │   ├── intermediate/    # int_condition_normalized
+│   │   └── marts/           # fct + 7 dims + 4 bridges
+│   ├── seeds/
+│   │   └── condition_normalization.csv  # 3,771 raw→normalized mappings
 │   ├── tests/
 │   └── dbt_project.yml
 ├── src/
 │   └── extract_api_data.py  # API ingestion script
 ├── notebooks/
-│   └── 01_exploration_SLA.ipynb  # Full EDA: 5 analytical questions answered, 6 charts, executed with outputs
+│   └── 01_exploration_SLA.ipynb  # Independent EDA & tie-out validation against DuckDB
 ├── docs/
-│   └── SLA.md               # Business requirements, KPI definitions, analytical questions
+│   └── SLA.md                # Business requirements, KPI definitions, analytical questions
 ├── assets/
-│   └── images/              # Dashboard screenshots
+│   └── images/                # Dashboard screenshots
 ├── requirements.txt
 ├── Makefile
 └── README.md
@@ -318,8 +396,8 @@ clinical_trials_analysis/
 
 ## Author
 
-**Adrián Soria Castellano**  
-Data Analytics · Analytics Engineering  
+**Adrián Soria Castellano**
+Data Analytics · Analytics Engineering
 [GitHub](https://github.com/adriansoriacastellano)
 
 *Background in Neuroscience (BSc + MSc). Transitioning into Data Analytics and Analytics Engineering. Currently building analytics engineering projects. Open to Data Analyst and Analytics Engineer roles.*
