@@ -130,7 +130,7 @@ ClinicalTrials.gov API v2
 | DBeaver | Independent SQL verification of dashboard numbers |
 | Git + GitHub | Version control and public portfolio |
 
-> **Note on Power BI connectivity:** Mart tables were exported to Parquet files on the Windows filesystem rather than connecting Power BI directly to the DuckDB database. The primary reason was file size: the full DuckDB file (`dwh_dev.duckdb`) weighs ~4 GB, while the exported Parquet files for the mart layer total a fraction of that. The DuckDB database remains the source of truth; the Parquet files are a lightweight transport layer for the reporting tier.
+> **Note on Power BI connectivity:** Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. The initial approach was a direct ODBC connection — first attempted from within WSL2 (blocked by a path configuration error), then from a copy of the database file on the Windows filesystem (the connection loaded tables but hung before completing). Rather than continue debugging the environment, Parquet export was adopted as a pragmatic working alternative: mart tables are copied from DuckDB to Parquet files, which Power BI reads directly. The DuckDB database remains the source of truth; Parquet is a transport layer for the reporting tier, not a duplicate source of logic.
 
 ---
 
@@ -287,9 +287,9 @@ Conditions containing "healthy" are excluded from the therapeutic area analysis 
 
 **Proposed solution:** Add an `is_medical_condition` boolean column to `int_condition_normalized` in dbt, so the exclusion logic lives in the transformation layer instead of the reporting layer.
 
-### 4. Parquet transport layer vs. direct ODBC connection
+### 4. Parquet transport layer instead of a direct ODBC connection
 
-Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. This was a deliberate choice based on file size: the full DuckDB database is ~4 GB, making a direct connection less practical for a local development setup. In a production environment, the preferred architecture would be a cloud data warehouse (e.g. BigQuery, Snowflake) with a native Power BI connector and incremental refresh.
+Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. This was not the original plan: a direct ODBC connection was attempted first, but failed for environment-specific reasons — a path misconfiguration when connecting from WSL2, and a connection that hung when retried from a Windows-side copy of the file. Parquet export was adopted as a working substitute once ODBC troubleshooting stalled. The correct fix is to resolve the ODBC connection properly. In a production environment, the preferred architecture would be a cloud data warehouse (e.g. BigQuery, Snowflake) with a native Power BI connector and incremental refresh.
 
 ---
 
