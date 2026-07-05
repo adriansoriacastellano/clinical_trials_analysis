@@ -80,6 +80,36 @@ models:
       - name: status_id
         data_tests:
           - not_null
+          - relationships:
+              to: ref('dim_status')
+              field: status_id
+      - name: sponsor_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_sponsor')
+              field: sponsor_id
+      - name: date_id_start
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
+      - name: date_id_completion
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
+      - name: date_id_primary_completion
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
+      - name: date_id_first_posted
+        data_tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
       - name: enrollment_count
         description: "Number of enrolled participants. Some trials do not report this."
       - name: duration_days
@@ -91,6 +121,60 @@ models:
       - name: nct_id
         data_tests:
           - not_null
+          - relationships:
+              to: ref('fct_clinical_trials')
+              field: nct_id
       - name: intervention_type_id
         data_tests:
           - not_null
+          - relationships:
+              to: ref('dim_intervention_type')
+              field: intervention_type_id
+
+  - name: brg_trial_condition
+    description: "Bridge table linking clinical trials to medical conditions."
+    columns:
+      - name: nct_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_clinical_trials')
+              field: nct_id
+      - name: condition_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_condition')
+              field: condition_id
+
+  - name: brg_trial_country
+    description: "Bridge table linking clinical trials to countries."
+    columns:
+      - name: nct_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_clinical_trials')
+              field: nct_id
+      - name: country_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_country')
+              field: country_id
+
+  - name: brg_trial_phase
+    description: "Bridge table linking clinical trials to trial phases."
+    columns:
+      - name: nct_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('fct_clinical_trials')
+              field: nct_id
+      - name: phase_id
+        data_tests:
+          - not_null
+          - relationships:
+              to: ref('dim_phase')
+              field: phase_id

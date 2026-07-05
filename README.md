@@ -98,7 +98,7 @@ ClinicalTrials.gov API v2
   └── raw.raw_clinical_trials (28 columns)
          │
          ▼
-  dbt Core 1.11.11 / dbt-duckdb 1.10.1 (14 models · 1 seed · 38/38 tests PASS)
+  dbt Core 1.11.11 / dbt-duckdb 1.10.1 (14 models · 1 seed · 45/45 tests PASS)
   ├── Staging:      stg_clinical_trials (+ date range validation)
   ├── Intermediate: int_condition_normalized
   ├── Fact:         fct_clinical_trials (137,556 rows)
@@ -334,7 +334,7 @@ dbt run
 dbt test
 ```
 
-Expected: 14 models built, 1 seed loaded (`condition_normalization`, 3,771 rows), **38/38 tests passing**.
+Expected: 14 models built, 1 seed loaded (`condition_normalization`, 3,771 rows), **45/45 tests passing**.
 
 ### Step 3 — Export to Parquet and build the dashboard
 
