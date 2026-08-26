@@ -13,6 +13,7 @@ Built as a portfolio project to demonstrate a full analytics pipeline: API inges
 - [Business Context](#business-context)
 - [Data & Methodology](#data--methodology)
 - [Technical Architecture](#technical-architecture)
+- [dbt Documentation](#dbt-documentation)
 - [Key Findings](#key-findings)
 - [Dashboard](#dashboard)
 - [Known Limitations & Future Work](#known-limitations--future-work)
@@ -131,6 +132,23 @@ ClinicalTrials.gov API v2
 | Git + GitHub | Version control and public portfolio |
 
 > **Note on Power BI connectivity:** Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. The initial approach was a direct ODBC connection — first attempted from within WSL2 (blocked by a path configuration error), then from a copy of the database file on the Windows filesystem (the connection loaded tables but hung before completing). Rather than continue debugging the environment, Parquet export was adopted as a pragmatic working alternative: mart tables are copied from DuckDB to Parquet files, which Power BI reads directly. The DuckDB database remains the source of truth; Parquet is a transport layer for the reporting tier, not a duplicate source of logic.
+
+---
+
+## dbt Documentation
+
+The full dbt project documentation — model lineage graph (DAG), column-level descriptions, test coverage, and source freshness — is published at:
+
+**[adriansoriacastellano.github.io/clinical_trials_analysis](https://adriansoriacastellano.github.io/clinical_trials_analysis/)**
+
+It's generated with `dbt docs generate` and served as a static site from the `gh-pages` branch, kept separate from `main` so regenerating it doesn't add noise to the project's real history. It isn't rebuilt automatically yet (no CI is configured — see Known Limitations), so it reflects the state of the dbt project as of the last manual publish. To refresh it:
+
+```bash
+cd dbt_project
+dbt docs generate -t dev
+# then copy target/index.html, target/manifest.json and target/catalog.json
+# to the root of the gh-pages branch and push
+```
 
 ---
 
@@ -290,6 +308,12 @@ Conditions containing "healthy" are excluded from the therapeutic area analysis 
 ### 4. Parquet transport layer instead of a direct ODBC connection
 
 Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. This was not the original plan: a direct ODBC connection was attempted first, but failed for environment-specific reasons — a path misconfiguration when connecting from WSL2, and a connection that hung when retried from a Windows-side copy of the file. Parquet export was adopted as a working substitute once ODBC troubleshooting stalled. The correct fix is to resolve the ODBC connection properly. In a production environment, the preferred architecture would be a cloud data warehouse (e.g. BigQuery, Snowflake) with a native Power BI connector and incremental refresh.
+
+### 5. dbt docs site is published manually, not on every change
+
+The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `gh-pages` by hand, so it can drift out of sync with `main` between publishes. No CI is configured yet.
+
+**Proposed solution:** a GitHub Action that runs `dbt docs generate` and publishes to `gh-pages` on every push to `main`.
 
 ---
 
