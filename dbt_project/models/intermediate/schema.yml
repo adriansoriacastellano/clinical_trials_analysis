@@ -1,0 +1,15 @@
+version: 2
+
+models:
+  - name: int_condition_normalized
+    description: "Maps every distinct raw condition string found in the source data to a canonical name, via the condition_normalization seed. Falls back to the raw string when no mapping exists. Feeds dim_condition."
+    columns:
+      - name: condition_name_raw
+        description: "Distinct raw condition string as it appears in the API extract."
+        data_tests:
+          - not_null
+          - unique
+      - name: condition_name_normalized
+        description: "Canonical condition name (from the seed), or the raw string unchanged if not mapped."
+        data_tests:
+          - not_null
