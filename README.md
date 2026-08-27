@@ -124,7 +124,7 @@ ClinicalTrials.gov API v2
 
 | Tool | Role |
 |---|---|
-| Python 3.12 | API ingestion, Parquet export |
+| Python 3.12 | API ingestion, Parquet export, statistical validation (SciPy) |
 | DuckDB | Local data warehouse |
 | dbt Core | Transformations, data quality tests, lineage |
 | Power BI Desktop | Dashboard and semantic model |
@@ -154,6 +154,8 @@ dbt docs generate -t dev
 
 ## Key Findings
 
+Each finding below is backed by a chi-square test of independence (categorical factor vs. completion/abandonment) and, for its headline comparison, a two-proportion z-test with a 95% confidence interval — both computed independently in [`notebooks/01_exploration_SLA.ipynb`, Section 8](notebooks/01_exploration_SLA.ipynb). With 137,556 trials, p-values are almost always extremely small regardless of how much a factor actually matters in practice, so the notebook also reports effect sizes (Cramér's V) — treat those, not the p-values alone, as the signal of practical importance.
+
 ### Global KPIs
 
 | Metric | Value |
@@ -170,7 +172,7 @@ dbt docs generate -t dev
 
 ### Finding 1 — Phase II is the riskiest phase
 
-Phase II has the lowest completion rate (46.8%) and the highest abandonment rate (17.0%) of all phases. Phase I, III, and IV all sit meaningfully higher. This aligns with the known "Phase II valley of death" in drug development: early signals of safety (Phase I) are promising, but efficacy proof is where most programmes fail.
+Phase II has the lowest completion rate (46.8%) and the highest abandonment rate (17.0%) of all phases — the gap vs. Phase I (61.0% completion) is highly significant (p<0.001). Phase I, III, and IV all sit meaningfully higher. This aligns with the known "Phase II valley of death" in drug development: early signals of safety (Phase I) are promising, but efficacy proof is where most programmes fail.
 
 | Phase | Completion Rate | Abandonment Rate |
 |---|---|---|
@@ -183,7 +185,7 @@ Phase II has the lowest completion rate (46.8%) and the highest abandonment rate
 
 ### Finding 2 — Industry outperforms NIH in completion rate (a finding that reversed after the bug fix)
 
-With the corrected dataset, **Industry-sponsored trials complete at a substantially higher rate (67.5%) than NIH-sponsored trials (52.7%)** — a 15-point gap in the opposite direction from what the contaminated dataset had suggested. This is a useful example of why the bug-fix story above matters: the date-filter bug disproportionately affected which trials were included per sponsor type, and correcting it changed not just the magnitude but the *direction* of this finding.
+With the corrected dataset, **Industry-sponsored trials complete at a substantially higher rate (67.5% vs. 52.7% for NIH, p<0.001)** — a 15-point gap in the opposite direction from what the contaminated dataset had suggested. This is a useful example of why the bug-fix story above matters: the date-filter bug disproportionately affected which trials were included per sponsor type, and correcting it changed not just the magnitude but the *direction* of this finding.
 
 | Sponsor | Completion Rate | Abandonment Rate |
 |---|---|---|
@@ -201,7 +203,7 @@ A plausible explanation: industry portfolios are managed under stronger commerci
 
 ### Finding 3 — Very small trials have a sharply elevated abandonment risk
 
-The relationship between enrollment size and outcome is not a smooth gradient — it is a cliff. Trials with fewer than 50 participants abandon at **24.5%**, roughly 4–6x the rate of every other enrollment band, which all cluster between 4.1% and 6.1%. Completion rate itself is fairly flat across bands (52.7%–61.6%), so the story here is specifically about abandonment risk concentrated in the smallest trials — consistent with underfunded or underpowered studies being cut short.
+The relationship between enrollment size and outcome is not a smooth gradient — it is a cliff. Trials with fewer than 50 participants abandon at **24.5%** (vs. 6.1% in the next band, p<0.001), roughly 4–6x the rate of every other enrollment band, which all cluster between 4.1% and 6.1%. Completion rate itself is fairly flat across bands (52.7%–61.6%), so the story here is specifically about abandonment risk concentrated in the smallest trials — consistent with underfunded or underpowered studies being cut short.
 
 | Enrollment Band | Completion Rate | Abandonment Rate |
 |---|---|---|
@@ -216,7 +218,7 @@ The relationship between enrollment size and outcome is not a smooth gradient �
 
 ### Finding 4 — China is a geographic outlier; Germany leads on completion
 
-Among the four largest trial-hosting countries, China has by far the lowest completion rate (33.3%) — yet also the lowest abandonment rate (5.3%). The gap is explained by a large volume of trials sitting in "Unknown" status: neither completed nor abandoned, simply unreported. This is a data completeness issue in ClinicalTrials.gov reporting for Chinese trials, not evidence that trials are failing. Germany leads in completion rate (64.7%) among the major countries, despite having the smallest trial volume of the four.
+Among the four largest trial-hosting countries, China has by far the lowest completion rate (33.3%) — yet also the lowest abandonment rate (5.3%). Country is significantly associated with outcome overall (χ² test across the four countries, p<0.001). The China gap is explained by a large volume of trials sitting in "Unknown" status: neither completed nor abandoned, simply unreported — a data completeness issue in ClinicalTrials.gov reporting for Chinese trials, not evidence that trials are failing, and confounded enough that it isn't used for a direct proportion test below. Germany leads in completion rate (64.7% vs. 59.1% for the United States, p<0.001) among the major countries, despite having the smallest trial volume of the four.
 
 | Country | Total Trials | Completion Rate | Abandonment Rate |
 |---|---|---|---|
@@ -229,7 +231,7 @@ Among the four largest trial-hosting countries, China has by far the lowest comp
 
 ### Finding 5 — The highest-volume therapeutic areas show moderate, not high, completion
 
-Among conditions with ≥1,000 trials (excluding non-medical "healthy volunteer" studies), the five largest by volume are COVID-19 and four major cancer indications. None of them are high-completion outliers — all sit in a 32%–47% band, meaningfully below the 55.2% dataset-wide average, and abandonment runs high across the board (17.6%–25.5%). This reflects both the complexity and duration typical of large oncology programmes and the disruption COVID-19 caused to trial continuity.
+Among conditions with ≥1,000 trials (excluding non-medical "healthy volunteer" studies), the five largest by volume are COVID-19 and four major cancer indications. None of them are high-completion outliers — all sit in a 32%–47% band, meaningfully below the 55.2% dataset-wide average, and abandonment runs high across the board (17.6%–25.5%). The pattern is statistically significant (χ² test across the five conditions, p<0.001), though it's the weakest association of any factor tested (Cramér's V=0.097); the extremes within this band — COVID-19 vs. Non-Small Cell Lung Cancer — differ by 14.6 points (p<0.001). This reflects both the complexity and duration typical of large oncology programmes and the disruption COVID-19 caused to trial continuity.
 
 | Condition | Completion Rate | Abandonment Rate |
 |---|---|---|
@@ -243,7 +245,9 @@ Among conditions with ≥1,000 trials (excluding non-medical "healthy volunteer"
 
 ### Finding 6 — Intervention type shows the widest completion spread of any factor
 
-Intervention type produces the largest range of any single factor in this analysis: from 28.6% (Radiation) to 64.0% (Behavioral) — a 35-point spread, wider than Phase, Sponsor, or Country. Behavioral and Dietary Supplement interventions complete most reliably; Radiation and Genetic interventions show the highest abandonment. Drug trials, the largest category by far (over 80% of all trials), sit close to the dataset average.
+Intervention type produces the largest range of any single factor in this analysis: from 28.6% (Radiation) to 64.0% (Behavioral) — a 35-point spread (p<0.001), wider than Phase, Sponsor, or Country. Behavioral and Dietary Supplement interventions complete most reliably; Radiation and Genetic interventions show the highest abandonment. Drug trials, the largest category by far (over 80% of all trials), sit close to the dataset average.
+
+**A nuance the raw spread hides:** despite having the widest range between its two extreme categories, Intervention Type's *overall* association with outcome (Cramér's V=0.112) is more modest than Sponsor's (V=0.210) or Country's (V=0.214) — because the vast majority of trials sit in one category (Drug) close to the dataset average, which dilutes the aggregate association even though the extremes are the furthest apart of any factor. See the [statistical validation notebook](notebooks/01_exploration_SLA.ipynb) for the full effect-size comparison across all six factors.
 
 | Intervention Type | Completion Rate | Abandonment Rate |
 |---|---|---|
