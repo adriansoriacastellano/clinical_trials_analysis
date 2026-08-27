@@ -1,3 +1,5 @@
+{% set safe_cast_fn = 'safe_cast' if target.type == 'bigquery' else 'try_cast' %}
+
 with source as (
     select * from {{ source('raw', 'raw_clinical_trials') }}
 ),
@@ -10,20 +12,20 @@ typed as (
         official_title,
         overall_status,
         case
-            when start_date like '____-__-__' then try_cast(start_date as date)
-            when start_date like '____-__' then try_cast(start_date || '-01' as date)
+            when start_date like '____-__-__' then {{ safe_cast_fn }}(start_date as date)
+            when start_date like '____-__' then {{ safe_cast_fn }}(start_date || '-01' as date)
             else null
         end as start_date_raw,
         start_date_type,
         case
-            when primary_completion_date like '____-__-__' then try_cast(primary_completion_date as date)
-            when primary_completion_date like '____-__' then try_cast(primary_completion_date || '-01' as date)
+            when primary_completion_date like '____-__-__' then {{ safe_cast_fn }}(primary_completion_date as date)
+            when primary_completion_date like '____-__' then {{ safe_cast_fn }}(primary_completion_date || '-01' as date)
             else null
         end as primary_completion_date_raw,
         primary_completion_date_type,
         case
-            when completion_date like '____-__-__' then try_cast(completion_date as date)
-            when completion_date like '____-__' then try_cast(completion_date || '-01' as date)
+            when completion_date like '____-__-__' then {{ safe_cast_fn }}(completion_date as date)
+            when completion_date like '____-__' then {{ safe_cast_fn }}(completion_date || '-01' as date)
             else null
         end as completion_date_raw,
         completion_date_type,
@@ -55,17 +57,17 @@ validated as (
         official_title,
         overall_status,
         case
-            when start_date_raw >= '2010-01-01' and start_date_raw <= '2024-12-31'
+            when start_date_raw >= date '2010-01-01' and start_date_raw <= date '2024-12-31'
             then start_date_raw else null
         end as start_date,
         start_date_type,
         case
-            when primary_completion_date_raw >= '2010-01-01' and primary_completion_date_raw <= '2024-12-31'
+            when primary_completion_date_raw >= date '2010-01-01' and primary_completion_date_raw <= date '2024-12-31'
             then primary_completion_date_raw else null
         end as primary_completion_date,
         primary_completion_date_type,
         case
-            when completion_date_raw >= '2010-01-01' and completion_date_raw <= '2024-12-31'
+            when completion_date_raw >= date '2010-01-01' and completion_date_raw <= date '2024-12-31'
             then completion_date_raw else null
         end as completion_date,
         completion_date_type,

@@ -14,6 +14,7 @@ Built as a portfolio project to demonstrate a full analytics pipeline: API inges
 - [Data & Methodology](#data--methodology)
 - [Technical Architecture](#technical-architecture)
 - [dbt Documentation](#dbt-documentation)
+- [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)
 - [Key Findings](#key-findings)
 - [Dashboard](#dashboard)
 - [Known Limitations & Future Work](#known-limitations--future-work)
@@ -129,6 +130,7 @@ ClinicalTrials.gov API v2
 | dbt Core | Transformations, data quality tests, lineage |
 | Power BI Desktop | Dashboard and semantic model |
 | DBeaver | Independent SQL verification of dashboard numbers |
+| BigQuery (optional) | Cloud warehouse target — same 14 models, no code fork |
 | Git + GitHub | Version control and public portfolio |
 
 > **Note on Power BI connectivity:** Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. The initial approach was a direct ODBC connection — first attempted from within WSL2 (blocked by a path configuration error), then from a copy of the database file on the Windows filesystem (the connection loaded tables but hung before completing). Rather than continue debugging the environment, Parquet export was adopted as a pragmatic working alternative: mart tables are copied from DuckDB to Parquet files, which Power BI reads directly. The DuckDB database remains the source of truth; Parquet is a transport layer for the reporting tier, not a duplicate source of logic.
@@ -149,6 +151,74 @@ dbt docs generate -t dev
 # then copy target/index.html, target/manifest.json and target/catalog.json
 # to the root of the gh-pages branch and push
 ```
+
+---
+
+## BigQuery (Optional Cloud Warehouse)
+
+By default this project runs entirely locally against DuckDB (the `dev` target) — no cloud account needed to clone and run it. A second dbt target, `bigquery`, runs the **same 14 models** against a real cloud data warehouse instead, to show the local-to-cloud path without giving up the zero-cost, zero-setup default. `dbt run`/`dbt test` against `bigquery` produce identical results to `dev`: 48/48 tests passing, and every mart table matching row-for-row (including the 55.2% headline completion rate).
+
+### 1. Create a GCP project and enable BigQuery
+1. Create a project at [console.cloud.google.com](https://console.cloud.google.com/).
+2. Enable billing (a card is required, but BigQuery's **Always Free tier** — 1 TB of queries/month + 10 GB storage — comfortably covers this project's ~140K rows; expect $0). Set a small budget alert as a safety net.
+3. Search **"BigQuery API"** in the console and enable it for the project.
+
+### 2. Create a service account and key
+1. **IAM & Admin → Service Accounts → Create Service Account.**
+2. Grant it two roles: **BigQuery Data Editor** and **BigQuery Job User**.
+3. Open the service account → **Keys → Add Key → Create new key → JSON**. This downloads a credentials file.
+
+**Never commit this file or place it inside the repo.** Store it somewhere outside the project folder (e.g. `~/.gcp/`).
+
+### 3. Set environment variables
+
+```bash
+export BIGQUERY_PROJECT="your-gcp-project-id"
+export BIGQUERY_KEYFILE="/absolute/path/to/service-account-key.json"
+export BIGQUERY_DATASET="main"   # optional — defaults to "main" if unset
+```
+
+### 4. Add a `bigquery` target to your local `~/.dbt/profiles.yml`
+
+`profiles.yml` is never committed to the repo (it lives outside it and holds credential paths), so this is a one-time local addition alongside the existing `dev`/`prod` DuckDB targets:
+
+```yaml
+dbt_project:
+  target: dev   # keep DuckDB as the default; opt into BigQuery explicitly with -t bigquery
+  outputs:
+    dev:
+      type: duckdb
+      path: "/absolute/path/to/clinical_trials_analysis/data/dwh_dev.duckdb"
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('BIGQUERY_PROJECT') }}"
+      dataset: "{{ env_var('BIGQUERY_DATASET', 'main') }}"
+      keyfile: "{{ env_var('BIGQUERY_KEYFILE') }}"
+      threads: 4
+      location: US
+```
+
+### 5. Load the raw data into BigQuery
+
+`src/extract_api_data.py` is unchanged — it still writes locally (CSV + the DuckDB dev warehouse) regardless of which dbt target you use. A separate script loads the resulting CSV into BigQuery's `raw` dataset (created automatically if it doesn't exist):
+
+```bash
+python src/load_raw_to_bigquery.py
+```
+
+### 6. Run dbt against BigQuery
+
+```bash
+cd dbt_project
+dbt seed -t bigquery
+dbt run -t bigquery
+dbt test -t bigquery
+```
+
+### How the models stay portable
+
+About a dozen DuckDB-specific SQL constructs don't exist in BigQuery's dialect — JSON array unnesting, pipe-delimited string splitting, the `dim_date` date spine (including DuckDB and BigQuery numbering weekdays differently — both are normalized to the same 0=Sunday convention), `TRY_CAST` vs. `SAFE_CAST`, and date subtraction vs. `DATE_DIFF`. Rather than fork the project into two sets of models, each affected model branches on `{{ target.type }}` and contains both dialects side by side in the same file — one dbt project, two warehouses, nothing to keep in sync by hand.
 
 ---
 
@@ -311,13 +381,17 @@ Conditions containing "healthy" are excluded from the therapeutic area analysis 
 
 ### 4. Parquet transport layer instead of a direct ODBC connection
 
-Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. This was not the original plan: a direct ODBC connection was attempted first, but failed for environment-specific reasons — a path misconfiguration when connecting from WSL2, and a connection that hung when retried from a Windows-side copy of the file. Parquet export was adopted as a working substitute once ODBC troubleshooting stalled. The correct fix is to resolve the ODBC connection properly. In a production environment, the preferred architecture would be a cloud data warehouse (e.g. BigQuery, Snowflake) with a native Power BI connector and incremental refresh.
+Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. This was not the original plan: a direct ODBC connection was attempted first, but failed for environment-specific reasons — a path misconfiguration when connecting from WSL2, and a connection that hung when retried from a Windows-side copy of the file. Parquet export was adopted as a working substitute once ODBC troubleshooting stalled. A `bigquery` dbt target now exists (see [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)), which sidesteps the DuckDB-ODBC problem entirely — BigQuery has a native, well-supported Power BI connector with incremental refresh. Wiring the dashboard to query BigQuery directly instead of the Parquet export is the natural next step; not yet done.
 
 ### 5. dbt docs site is published manually, not on every change
 
 The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `gh-pages` by hand, so it can drift out of sync with `main` between publishes. No CI is configured yet.
 
 **Proposed solution:** a GitHub Action that runs `dbt docs generate` and publishes to `gh-pages` on every push to `main`.
+
+### 6. Loading raw data into BigQuery is a separate manual step
+
+`src/load_raw_to_bigquery.py` has to be run by hand after `extract_api_data.py`, and does a full-refresh load (`WRITE_TRUNCATE`) rather than an incremental one — there's no automated pipeline keeping the DuckDB and BigQuery raw tables in sync. Acceptable for a dataset extracted a handful of times so far; a real pipeline would fold this into the extraction step itself.
 
 ---
 
@@ -408,7 +482,8 @@ clinical_trials_analysis/
 │   ├── tests/
 │   └── dbt_project.yml
 ├── src/
-│   └── extract_api_data.py  # API ingestion script
+│   ├── extract_api_data.py       # API ingestion script (writes locally, always)
+│   └── load_raw_to_bigquery.py   # optional: loads the raw CSV into BigQuery
 ├── notebooks/
 │   └── 01_exploration_SLA.ipynb  # Independent EDA & tie-out validation against DuckDB
 ├── sql/
