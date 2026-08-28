@@ -4,7 +4,7 @@
 
 An end-to-end data analytics project exploring completion and abandonment patterns across 137,556 clinical trials registered in ClinicalTrials.gov (Phases I–IV, 2010–2024).
 
-Built as a portfolio project to demonstrate a full analytics pipeline: API ingestion → data warehouse → dimensional modelling → interactive dashboard.
+Built as a portfolio project to demonstrate a full analytics pipeline: API ingestion → data warehouse → dimensional modeling → interactive dashboard.
 
 ---
 
@@ -67,13 +67,13 @@ Both metrics are visible in the dashboard: the raw rate (55.2%) as a global KPI 
 
 ### Enrollment Bands
 
-Enrollment was categorised into six bands to enable comparison across trial sizes:
+Enrollment was categorized into six bands to enable comparison across trial sizes:
 
 `<50` · `50–99` · `100–199` · `200–499` · `500–999` · `1,000+`
 
 ### Condition Normalization
 
-Free-text condition fields from the API contain orthographic variants of the same underlying condition (e.g. "COVID-19" vs "Covid19"). A dbt seed (`condition_normalization.csv`, 3,771 mappings) maps raw values to a canonical `condition_name_normalized`, implemented as a new intermediate model (`int_condition_normalized`). Both `condition_name_raw` and `condition_name_normalized` are kept in `dim_condition` for traceability. This normalization covers the variants detected by an automated matching pass; full manual review of all ~45,000 unique conditions was out of scope (see Limitations).
+Free-text condition fields from the API contain orthographic variants of the same underlying condition (e.g. "COVID-19" vs "Covid19"). A dbt seed (`condition_normalization.csv`, 3,771 mappings) maps raw values to a canonical `condition_name_normalized`, implemented as a new intermediate model (`int_condition_normalized`). Both `condition_name_raw` and `condition_name_normalized` are kept in `dim_condition` for traceability. This normalization covers the variants detected by an automated matching pass; full manual review of all ~45,000 unique conditions was out of scope (see [Known Limitations](#known-limitations--future-work)).
 
 ### Thresholds for Statistical Representativeness
 
@@ -96,11 +96,13 @@ ClinicalTrials.gov API v2
   └── 137,556 records → raw JSON
          │
          ▼
-  DuckDB (dwh_dev.duckdb)
+  DuckDB (dwh_dev.duckdb) — default, local, zero-setup
   └── raw.raw_clinical_trials (28 columns)
+  (optional: same raw data also loadable into BigQuery — see below)
          │
          ▼
-  dbt Core 1.11.11 / dbt-duckdb 1.10.1 (14 models · 1 seed · 48/48 tests PASS)
+  dbt Core 1.11.11 — dbt-duckdb 1.10.1 or dbt-bigquery 1.12.0
+  (14 models · 1 seed · 48/48 tests PASS, identical on both targets)
   ├── Staging:      stg_clinical_trials (+ date range validation)
   ├── Intermediate: int_condition_normalized
   ├── Fact:         fct_clinical_trials (137,556 rows)
@@ -125,8 +127,8 @@ ClinicalTrials.gov API v2
 
 | Tool | Role |
 |---|---|
-| Python 3.12 | API ingestion, Parquet export, statistical validation (SciPy) |
-| DuckDB | Local data warehouse |
+| Python 3.12 | API ingestion, Parquet export, statistical validation (SciPy), BigQuery loading |
+| DuckDB | Local data warehouse (default) |
 | dbt Core | Transformations, data quality tests, lineage |
 | Power BI Desktop | Dashboard and semantic model |
 | DBeaver | Independent SQL verification of dashboard numbers |
@@ -143,7 +145,7 @@ The full dbt project documentation — model lineage graph (DAG), column-level d
 
 **[adriansoriacastellano.github.io/clinical_trials_analysis](https://adriansoriacastellano.github.io/clinical_trials_analysis/)**
 
-It's generated with `dbt docs generate` and served as a static site from the `gh-pages` branch, kept separate from `main` so regenerating it doesn't add noise to the project's real history. It isn't rebuilt automatically yet (no CI is configured — see Known Limitations), so it reflects the state of the dbt project as of the last manual publish. To refresh it:
+It's generated with `dbt docs generate` and served as a static site from the `gh-pages` branch, kept separate from `main` so regenerating it doesn't add noise to the project's real history. It isn't rebuilt automatically yet (no CI is configured — see [Known Limitations](#known-limitations--future-work)), so it reflects the state of the dbt project as of the last manual publish. To refresh it:
 
 ```bash
 cd dbt_project
@@ -242,7 +244,7 @@ Each finding below is backed by a chi-square test of independence (categorical f
 
 ### Finding 1 — Phase II is the riskiest phase
 
-Phase II has the lowest completion rate (46.8%) and the highest abandonment rate (17.0%) of all phases — the gap vs. Phase I (61.0% completion) is highly significant (p<0.001). Phase I, III, and IV all sit meaningfully higher. This aligns with the known "Phase II valley of death" in drug development: early signals of safety (Phase I) are promising, but efficacy proof is where most programmes fail.
+Phase II has the lowest completion rate (46.8%) and the highest abandonment rate (17.0%) of all phases — the gap vs. Phase I (61.0% completion) is highly significant (p<0.001). Phase I, III, and IV all sit meaningfully higher. This aligns with the known "Phase II valley of death" in drug development: early signals of safety (Phase I) are promising, but efficacy proof is where most programs fail.
 
 | Phase | Completion Rate | Abandonment Rate |
 |---|---|---|
@@ -301,7 +303,7 @@ Among the four largest trial-hosting countries, China has by far the lowest comp
 
 ### Finding 5 — The highest-volume therapeutic areas show moderate, not high, completion
 
-Among conditions with ≥1,000 trials (excluding non-medical "healthy volunteer" studies), the five largest by volume are COVID-19 and four major cancer indications. None of them are high-completion outliers — all sit in a 32%–47% band, meaningfully below the 55.2% dataset-wide average, and abandonment runs high across the board (17.6%–25.5%). The pattern is statistically significant (χ² test across the five conditions, p<0.001), though it's the weakest association of any factor tested (Cramér's V=0.097); the extremes within this band — COVID-19 vs. Non-Small Cell Lung Cancer — differ by 14.6 points (p<0.001). This reflects both the complexity and duration typical of large oncology programmes and the disruption COVID-19 caused to trial continuity.
+Among conditions with ≥1,000 trials (excluding non-medical "healthy volunteer" studies), the five largest by volume are COVID-19 and four major cancer indications. None of them are high-completion outliers — all sit in a 32%–47% band, meaningfully below the 55.2% dataset-wide average, and abandonment runs high across the board (17.6%–25.5%). The pattern is statistically significant (χ² test across the five conditions, p<0.001), though it's the weakest association of any factor tested (Cramér's V=0.097); the extremes within this band — COVID-19 vs. Non-Small Cell Lung Cancer — differ by 14.6 points (p<0.001). This reflects both the complexity and duration typical of large oncology programs and the disruption COVID-19 caused to trial continuity.
 
 | Condition | Completion Rate | Abandonment Rate |
 |---|---|---|
@@ -393,6 +395,12 @@ The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `g
 
 `src/load_raw_to_bigquery.py` has to be run by hand after `extract_api_data.py`, and does a full-refresh load (`WRITE_TRUNCATE`) rather than an incremental one — there's no automated pipeline keeping the DuckDB and BigQuery raw tables in sync. Acceptable for a dataset extracted a handful of times so far; a real pipeline would fold this into the extraction step itself.
 
+### 7. The Power BI semantic model (relationships, DAX measures) isn't checked into the repo
+
+The `.pbix` file is excluded (see [How to Reproduce](#how-to-reproduce)), so the 13 relationships and 15 DAX measures behind the dashboard exist only inside that file — they aren't written down anywhere reproducible. `docs/SLA.md` documents the KPI *definitions* (the business logic), not the DAX *implementation* of them.
+
+**Proposed solution:** export the semantic model's relationships and measures (Power BI supports exporting DAX definitions via Tabular Editor or `.bim` extraction) into a versioned file in `docs/`.
+
 ---
 
 ## How to Reproduce
@@ -402,6 +410,7 @@ The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `g
 - Python 3.12+
 - dbt-duckdb
 - DuckDB
+- Optional: a GCP account + `dbt-bigquery`, to run against BigQuery instead — see [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)
 
 ```bash
 # Clone the repository
@@ -465,8 +474,8 @@ con.close()
 
 Then in Power BI Desktop:
 1. Get Data → Parquet → load each file from the `exports/` folder
-2. Configure relationships as described in `docs/SLA.md`
-3. Recreate the DAX measures listed in `docs/SLA.md`
+2. Configure the relationships (13 total, 12 active + 1 inactive) based on the fact/dimension/bridge structure in [Technical Architecture](#technical-architecture) and `docs/SLA.md`
+3. Rebuild the DAX measures from the KPI and rate definitions in [Data & Methodology](#data--methodology) and `docs/SLA.md`'s KPI glossary — the measures themselves aren't checked into the repo (they live in the `.pbix`, which isn't included; see [Known Limitations](#known-limitations--future-work))
 
 ---
 
