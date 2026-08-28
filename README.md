@@ -438,6 +438,8 @@ dbt test
 
 Expected: 14 models built, 1 seed loaded (`condition_normalization`, 3,771 rows), **48/48 tests passing**.
 
+> Want to run this against a cloud warehouse instead of the local DuckDB file? See [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse) — same models, same commands with `-t bigquery` added.
+
 ### Step 3 — Export to Parquet and build the dashboard
 
 The Power BI file (`.pbix`) is not included in this repository as it contains derived data. To rebuild the dashboard, first export the mart tables from DuckDB to Parquet:
