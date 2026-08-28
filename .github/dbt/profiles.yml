@@ -1,0 +1,19 @@
+# dbt profile used only by the scheduled-extraction GitHub Actions workflow
+# (.github/workflows/scheduled_extraction.yml), pointed to via DBT_PROFILES_DIR.
+# It mirrors the `bigquery` output block from the local ~/.dbt/profiles.yml
+# documented in the README's BigQuery section, minus the local-only `dev`/`prod`
+# DuckDB targets. Credentials are never hardcoded here - they come from env_var(),
+# populated by the workflow from repository secrets at run time.
+dbt_project:
+  target: bigquery
+  outputs:
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: "{{ env_var('BIGQUERY_PROJECT') }}"
+      dataset: "{{ env_var('BIGQUERY_DATASET', 'main') }}"
+      keyfile: "{{ env_var('BIGQUERY_KEYFILE') }}"
+      threads: 4
+      location: US
+      job_execution_timeout_seconds: 300
+      job_retries: 1

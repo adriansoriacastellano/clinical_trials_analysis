@@ -24,12 +24,15 @@ Usage:
     export BIGQUERY_KEYFILE=/path/to/key.json
     python src/load_raw_to_bigquery.py
 """
+import logging
 import os
 import sys
 from pathlib import Path
 
 from google.cloud import bigquery
 from google.oauth2 import service_account
+
+logger = logging.getLogger(__name__)
 
 RAW_CSV = Path("data/raw/clinical_trials_raw.csv")
 
@@ -79,12 +82,12 @@ def ensure_dataset(client, dataset_id, location):
     ref = bigquery.DatasetReference(client.project, dataset_id)
     try:
         client.get_dataset(ref)
-        print(f"Dataset {dataset_id} already exists.")
+        logger.info("Dataset %s already exists.", dataset_id)
     except Exception:
         ds = bigquery.Dataset(ref)
         ds.location = location
         client.create_dataset(ds)
-        print(f"Created dataset {dataset_id} in {location}.")
+        logger.info("Created dataset %s in %s.", dataset_id, location)
 
 
 def main():
@@ -112,14 +115,22 @@ def main():
         allow_quoted_newlines=True,
     )
 
-    print(f"Loading {RAW_CSV} into {table_id} ...")
+    logger.info("Loading %s into %s ...", RAW_CSV, table_id)
     with open(RAW_CSV, "rb") as f:
         job = client.load_table_from_file(f, table_id, job_config=job_config)
     job.result()
 
     table = client.get_table(table_id)
-    print(f"Done: {table.num_rows} rows loaded into {table_id}.")
+    logger.info("Done: %d rows loaded into %s.", table.num_rows, table_id)
 
 
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+    try:
+        main()
+    except Exception:
+        logger.exception("La carga en BigQuery fallo.")
+        sys.exit(1)

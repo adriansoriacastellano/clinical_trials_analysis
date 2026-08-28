@@ -15,6 +15,7 @@ Built as a portfolio project to demonstrate a full analytics pipeline: API inges
 - [Technical Architecture](#technical-architecture)
 - [dbt Documentation](#dbt-documentation)
 - [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)
+- [Automated Weekly Extraction](#automated-weekly-extraction)
 - [Key Findings](#key-findings)
 - [Dashboard](#dashboard)
 - [Known Limitations & Future Work](#known-limitations--future-work)
@@ -224,6 +225,32 @@ About a dozen DuckDB-specific SQL constructs don't exist in BigQuery's dialect �
 
 ---
 
+## Automated Weekly Extraction
+
+A GitHub Actions workflow ([`.github/workflows/scheduled_extraction.yml`](.github/workflows/scheduled_extraction.yml)) runs the full pipeline against BigQuery automatically every Monday at 03:00 UTC, and can also be triggered manually from the Actions tab (`workflow_dispatch`, with an optional "force full extraction" input).
+
+Each run:
+
+1. **Restores the previous run's extraction state.** `data/` is gitignored, so it wouldn't otherwise survive between separate workflow runs — an [`actions/cache`](https://github.com/actions/cache) entry stands in for it, holding the merged raw CSV, the pagination checkpoint, and the `LastUpdatePostDate` cutoff saved by the previous run.
+2. **Runs `src/extract_api_data.py`.** With a restored cutoff, this is an **incremental** extraction: it queries the API for studies with `LastUpdatePostDate` on or after that date only, and upserts the results into the existing CSV by `nct_id` (new studies appended, previously-seen ones replaced with their updated version). With no restored state — first run, a cache eviction, or `--full` / the workflow's `full: true` input — it falls back to the original from-scratch **full** extraction.
+3. **Loads the merged CSV into BigQuery** (`src/load_raw_to_bigquery.py`) — still a full-refresh (`WRITE_TRUNCATE`) load, which is cheap enough at ~140K rows that making the BigQuery load itself incremental isn't worth the complexity yet.
+4. **Runs `dbt build -t bigquery`** — seeds, models, and tests in one DAG-ordered command, against a `profiles.yml` checked into [`.github/dbt/`](.github/dbt/profiles.yml) for CI use only (distinct from the local, credential-holding `~/.dbt/profiles.yml`).
+5. **Saves the new extraction state** back to the cache for next week's run.
+
+**Required repository configuration** (Settings → Secrets and variables → Actions):
+
+| Name | Kind | Value |
+|---|---|---|
+| `GCP_SA_KEY` | Secret | Full contents of the service account JSON key (see [step 2 above](#2-create-a-service-account-and-key)) |
+| `BIGQUERY_PROJECT` | Secret | Your GCP project ID |
+| `BIGQUERY_DATASET` | Variable (optional) | Defaults to `main` if unset |
+
+**Error handling:** each API page request retries up to 3 times with backoff before giving up. Both scripts log to stdout with timestamps and wrap their entry point in a try/except that logs the full traceback and exits non-zero on any failure, so a broken run shows as a red ✗ in the Actions tab with the actual error visible in the failed step's log.
+
+**A known tradeoff:** the incremental cutoff lives in a GitHub Actions cache entry rather than a database or a file committed back to `main`, specifically so this workflow never needs write access to `main`. Caches can be evicted (7 days unused, or under storage pressure against the repo's 10 GB cache limit); if that happens, the next run silently falls back to a full extraction instead of failing — slower, but not incorrect, since the upsert-by-`nct_id` merge is idempotent either way.
+
+---
+
 ## Key Findings
 
 Each finding below is backed by a chi-square test of independence (categorical factor vs. completion/abandonment) and, for its headline comparison, a two-proportion z-test with a 95% confidence interval — both computed independently in [`notebooks/01_exploration_SLA.ipynb`, Section 8](notebooks/01_exploration_SLA.ipynb). With 137,556 trials, p-values are almost always extremely small regardless of how much a factor actually matters in practice, so the notebook also reports effect sizes (Cramér's V) — treat those, not the p-values alone, as the signal of practical importance.
@@ -391,9 +418,9 @@ The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `g
 
 **Proposed solution:** a GitHub Action that runs `dbt docs generate` and publishes to `gh-pages` on every push to `main`.
 
-### 6. Loading raw data into BigQuery is a separate manual step
+### 6. The BigQuery load is full-refresh, and the incremental cutoff is day-grained
 
-`src/load_raw_to_bigquery.py` has to be run by hand after `extract_api_data.py`, and does a full-refresh load (`WRITE_TRUNCATE`) rather than an incremental one — there's no automated pipeline keeping the DuckDB and BigQuery raw tables in sync. Acceptable for a dataset extracted a handful of times so far; a real pipeline would fold this into the extraction step itself.
+[Automated Weekly Extraction](#automated-weekly-extraction) covers the extraction itself incrementally, but `src/load_raw_to_bigquery.py` still does a full-refresh load (`WRITE_TRUNCATE`) of the merged CSV rather than loading only the changed rows — acceptable at ~140K rows, but every run re-uploads the entire table. Separately, the extraction's `LastUpdatePostDate` filter is only as precise as the day the API reports it at, so a study edited on the same calendar day as a run could in principle be picked up a day later than expected, or occasionally refetched twice at a day boundary — harmless given the upsert-by-`nct_id` merge, but not instantaneous.
 
 ### 7. The Power BI semantic model (relationships, DAX measures) isn't checked into the repo
 
@@ -432,9 +459,9 @@ pip install -r requirements.txt
 python src/extract_api_data.py
 ```
 
-This script connects to the ClinicalTrials.gov API v2 (no authentication required), applies filters for Phases I–IV within a correctly-parenthesized date window `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)` covering 2010–2024, and writes the results incrementally to `data/dwh_dev.duckdb`. The extraction supports checkpointing: if interrupted, it can be resumed from the last saved page.
+This script connects to the ClinicalTrials.gov API v2 (no authentication required). On a first run (no saved state yet) it applies the full filter for Phases I–IV within a correctly-parenthesized date window `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)` covering 2010–2024, writes results page-by-page to `data/raw/clinical_trials_raw.csv`, and loads them into `data/dwh_dev.duckdb`. On later runs it picks up the `LastUpdatePostDate` cutoff saved from the previous run and extracts incrementally instead — only studies that are new or changed since then, upserted into the existing CSV by `nct_id`. Pass `--full` to force a full extraction regardless of saved state. Separately from that, mid-run pagination is checkpointed: if a single run is interrupted, it resumes from the last saved page rather than restarting.
 
-Expected output: **137,556 trials** in `raw.raw_clinical_trials`.
+Expected output on a full run: **137,556 trials** in `raw.raw_clinical_trials`. See [Automated Weekly Extraction](#automated-weekly-extraction) for how this runs unattended on a schedule.
 
 ### Step 2 — Run dbt transformations
 
@@ -483,6 +510,11 @@ Then in Power BI Desktop:
 
 ```
 clinical_trials_analysis/
+├── .github/
+│   ├── workflows/
+│   │   └── scheduled_extraction.yml  # weekly incremental extraction -> BigQuery -> dbt build
+│   └── dbt/
+│       └── profiles.yml              # CI-only dbt profile (BigQuery target, no credentials)
 ├── dbt_project/
 │   ├── models/
 │   │   ├── staging/         # stg_clinical_trials (+ date range validation)
