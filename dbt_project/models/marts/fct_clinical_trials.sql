@@ -1,3 +1,6 @@
+{% set duration_expr = 'date_diff(s.completion_date, s.start_date, day)' if target.type == 'bigquery' else 's.completion_date - s.start_date' %}
+{% set lag_expr = 'date_diff(s.completion_date, s.primary_completion_date, day)' if target.type == 'bigquery' else 's.completion_date - s.primary_completion_date' %}
+
 with stg as (
     select * from {{ ref('stg_clinical_trials') }}
 ),
@@ -33,12 +36,12 @@ enriched as (
         s.disposition_events,
         case
             when s.start_date is not null and s.completion_date is not null
-            then s.completion_date - s.start_date
+            then {{ duration_expr }}
             else null
         end as duration_days,
         case
             when s.primary_completion_date is not null and s.completion_date is not null
-            then s.completion_date - s.primary_completion_date
+            then {{ lag_expr }}
             else null
         end as reporting_lag_days
     from stg s

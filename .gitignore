@@ -4,6 +4,9 @@ data/
 *.duckdb.wal
 __pycache__/
 .env
+*-key.json
+*service-account*.json
+.gcp/
 .agents/
 logs/
 outputs/
