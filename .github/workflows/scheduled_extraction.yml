@@ -1,0 +1,91 @@
+name: Scheduled Incremental Extraction
+
+# Weekly incremental pipeline: pulls only ClinicalTrials.gov studies that are new
+# or were updated since the last successful run, loads them into BigQuery, and
+# rebuilds the dbt models on top of it. See "Automated Weekly Extraction" in the
+# README for the full design and required repository secrets.
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # every Monday at 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Force a full extraction (ignore incremental state)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  extract-and-load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # data/ is gitignored, so the checkpoint, the incremental-extraction state,
+      # and the merged raw CSV wouldn't otherwise survive between separate runs of
+      # this workflow. Restore/save (rather than the combined cache action) is used
+      # deliberately: the exact key never hits on restore, so this always falls
+      # back to the newest previous run via restore-keys, and always saves a fresh
+      # entry at the end. If the cache is ever evicted, the next run just falls
+      # back to a full extraction - slower, but self-healing, not incorrect.
+      - name: Restore extraction state
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: extraction-state-${{ github.run_id }}
+          restore-keys: |
+            extraction-state-
+
+      - name: Run extraction
+        run: python src/extract_api_data.py ${{ inputs.full && '--full' || '' }}
+
+      - name: Write GCP service account key
+        run: echo '${{ secrets.GCP_SA_KEY }}' > "${{ runner.temp }}/gcp-key.json"
+
+      - name: Load raw data into BigQuery
+        env:
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          BIGQUERY_KEYFILE: ${{ runner.temp }}/gcp-key.json
+          BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
+        run: python src/load_raw_to_bigquery.py
+
+      # dbt build (not dbt run) deliberately: it runs seeds + models + tests in one
+      # DAG-ordered command, so a data-quality regression introduced by an
+      # incremental load (e.g. a bad LastUpdatePostDate edit) fails the job loudly
+      # instead of silently reaching the warehouse.
+      - name: dbt build against BigQuery
+        working-directory: dbt_project
+        env:
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          BIGQUERY_KEYFILE: ${{ runner.temp }}/gcp-key.json
+          BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
+          DBT_PROFILES_DIR: ${{ github.workspace }}/.github/dbt
+        run: dbt build -t bigquery
+
+      - name: Save extraction state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: extraction-state-${{ github.run_id }}
+
+      - name: Record failure in job summary
+        if: failure()
+        run: |
+          echo "### Scheduled extraction failed :x:" >> "$GITHUB_STEP_SUMMARY"
+          echo "Check the logs of the failed step above for details." >> "$GITHUB_STEP_SUMMARY"

@@ -4,7 +4,7 @@
 
 An end-to-end data analytics project exploring completion and abandonment patterns across 137,556 clinical trials registered in ClinicalTrials.gov (Phases I–IV, 2010–2024).
 
-Built as a portfolio project to demonstrate a full analytics pipeline: API ingestion → data warehouse → dimensional modeling → interactive dashboard.
+An end-to-end analytics engineering pipeline: API ingestion → dimensional data warehouse → interactive dashboard.
 
 ---
 
@@ -15,6 +15,7 @@ Built as a portfolio project to demonstrate a full analytics pipeline: API inges
 - [Technical Architecture](#technical-architecture)
 - [dbt Documentation](#dbt-documentation)
 - [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)
+- [Automated Weekly Extraction](#automated-weekly-extraction)
 - [Key Findings](#key-findings)
 - [Dashboard](#dashboard)
 - [Known Limitations & Future Work](#known-limitations--future-work)
@@ -111,11 +112,8 @@ ClinicalTrials.gov API v2
   └── Bridges:      brg_trial_phase · brg_trial_condition
                      brg_trial_country · brg_trial_intervention
          │
-         ▼
-  Parquet export (Python/DuckDB → Windows filesystem)
-         │
-         ▼
-  Power BI Desktop
+         ▼ (dashboard reads the bigquery target's marts — see Automated Weekly Extraction)
+  Power BI Desktop — live Google BigQuery connector (Import mode)
   ├── Semantic model (13 relationships, 12 active + 1 inactive)
   ├── 15 DAX measures
   └── 3-page interactive dashboard
@@ -127,15 +125,15 @@ ClinicalTrials.gov API v2
 
 | Tool | Role |
 |---|---|
-| Python 3.12 | API ingestion, Parquet export, statistical validation (SciPy), BigQuery loading |
+| Python 3.12 | API ingestion, statistical validation (SciPy), BigQuery loading |
 | DuckDB | Local data warehouse (default) |
 | dbt Core | Transformations, data quality tests, lineage |
-| Power BI Desktop | Dashboard and semantic model |
+| Power BI Desktop | Dashboard and semantic model, connected live to BigQuery |
 | DBeaver | Independent SQL verification of dashboard numbers |
-| BigQuery (optional) | Cloud warehouse target — same 14 models, no code fork |
+| BigQuery | Cloud warehouse target — same 14 models, no code fork; also what the dashboard reads from |
 | Git + GitHub | Version control and public portfolio |
 
-> **Note on Power BI connectivity:** Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. The initial approach was a direct ODBC connection — first attempted from within WSL2 (blocked by a path configuration error), then from a copy of the database file on the Windows filesystem (the connection loaded tables but hung before completing). Rather than continue debugging the environment, Parquet export was adopted as a pragmatic working alternative: mart tables are copied from DuckDB to Parquet files, which Power BI reads directly. The DuckDB database remains the source of truth; Parquet is a transport layer for the reporting tier, not a duplicate source of logic.
+> **Note on Power BI connectivity:** Power BI connects live to BigQuery via the native Google BigQuery connector (Import mode) — no export step, no ODBC driver. This wasn't the first approach: a direct DuckDB ODBC connection was attempted first (blocked by a path issue when connecting from WSL2, then a hang even after copying the database file to the Windows filesystem to rule that out), and a Parquet export was used as a working interim step while BigQuery didn't exist yet. Once the `bigquery` dbt target was added and verified row-for-row identical to DuckDB (see [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)), the dashboard's source was switched to it directly and the Parquet step was removed.
 
 ---
 
@@ -221,6 +219,32 @@ dbt test -t bigquery
 ### How the models stay portable
 
 About a dozen DuckDB-specific SQL constructs don't exist in BigQuery's dialect — JSON array unnesting, pipe-delimited string splitting, the `dim_date` date spine (including DuckDB and BigQuery numbering weekdays differently — both are normalized to the same 0=Sunday convention), `TRY_CAST` vs. `SAFE_CAST`, and date subtraction vs. `DATE_DIFF`. Rather than fork the project into two sets of models, each affected model branches on `{{ target.type }}` and contains both dialects side by side in the same file — one dbt project, two warehouses, nothing to keep in sync by hand.
+
+---
+
+## Automated Weekly Extraction
+
+A GitHub Actions workflow ([`.github/workflows/scheduled_extraction.yml`](.github/workflows/scheduled_extraction.yml)) runs the full pipeline against BigQuery automatically every Monday at 03:00 UTC, and can also be triggered manually from the Actions tab (`workflow_dispatch`, with an optional "force full extraction" input).
+
+Each run:
+
+1. **Restores the previous run's extraction state.** `data/` is gitignored, so it wouldn't otherwise survive between separate workflow runs — an [`actions/cache`](https://github.com/actions/cache) entry stands in for it, holding the merged raw CSV, the pagination checkpoint, and the `LastUpdatePostDate` cutoff saved by the previous run.
+2. **Runs `src/extract_api_data.py`.** With a restored cutoff, this is an **incremental** extraction: it queries the API for studies with `LastUpdatePostDate` on or after that date only, and upserts the results into the existing CSV by `nct_id` (new studies appended, previously-seen ones replaced with their updated version). With no restored state — first run, a cache eviction, or `--full` / the workflow's `full: true` input — it falls back to the original from-scratch **full** extraction.
+3. **Loads the merged CSV into BigQuery** (`src/load_raw_to_bigquery.py`) — still a full-refresh (`WRITE_TRUNCATE`) load, which is cheap enough at ~140K rows that making the BigQuery load itself incremental isn't worth the complexity yet.
+4. **Runs `dbt build -t bigquery`** — seeds, models, and tests in one DAG-ordered command, against a `profiles.yml` checked into [`.github/dbt/`](.github/dbt/profiles.yml) for CI use only (distinct from the local, credential-holding `~/.dbt/profiles.yml`).
+5. **Saves the new extraction state** back to the cache for next week's run.
+
+**Required repository configuration** (Settings → Secrets and variables → Actions):
+
+| Name | Kind | Value |
+|---|---|---|
+| `GCP_SA_KEY` | Secret | Full contents of the service account JSON key (see [step 2 above](#2-create-a-service-account-and-key)) |
+| `BIGQUERY_PROJECT` | Secret | Your GCP project ID |
+| `BIGQUERY_DATASET` | Variable (optional) | Defaults to `main` if unset |
+
+**Error handling:** each API page request retries up to 3 times with backoff before giving up. Both scripts log to stdout with timestamps and wrap their entry point in a try/except that logs the full traceback and exits non-zero on any failure, so a broken run shows as a red ✗ in the Actions tab with the actual error visible in the failed step's log.
+
+**A known tradeoff:** the incremental cutoff lives in a GitHub Actions cache entry rather than a database or a file committed back to `main`, specifically so this workflow never needs write access to `main`. Caches can be evicted (7 days unused, or under storage pressure against the repo's 10 GB cache limit); if that happens, the next run silently falls back to a full extraction instead of failing — slower, but not incorrect, since the upsert-by-`nct_id` merge is idempotent either way.
 
 ---
 
@@ -381,19 +405,19 @@ Conditions containing "healthy" are excluded from the therapeutic area analysis 
 
 **Proposed solution:** Add an `is_medical_condition` boolean column to `int_condition_normalized` in dbt, so the exclusion logic lives in the transformation layer instead of the reporting layer.
 
-### 4. Parquet transport layer instead of a direct ODBC connection
-
-Mart tables are served to Power BI via Parquet export rather than a live DuckDB ODBC connection. This was not the original plan: a direct ODBC connection was attempted first, but failed for environment-specific reasons — a path misconfiguration when connecting from WSL2, and a connection that hung when retried from a Windows-side copy of the file. Parquet export was adopted as a working substitute once ODBC troubleshooting stalled. A `bigquery` dbt target now exists (see [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)), which sidesteps the DuckDB-ODBC problem entirely — BigQuery has a native, well-supported Power BI connector with incremental refresh. Wiring the dashboard to query BigQuery directly instead of the Parquet export is the natural next step; not yet done.
-
-### 5. dbt docs site is published manually, not on every change
+### 4. dbt docs site is published manually, not on every change
 
 The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `gh-pages` by hand, so it can drift out of sync with `main` between publishes. No CI is configured yet.
 
 **Proposed solution:** a GitHub Action that runs `dbt docs generate` and publishes to `gh-pages` on every push to `main`.
 
-### 6. Loading raw data into BigQuery is a separate manual step
+### 5. The BigQuery load is full-refresh, and the incremental cutoff is day-grained
 
-`src/load_raw_to_bigquery.py` has to be run by hand after `extract_api_data.py`, and does a full-refresh load (`WRITE_TRUNCATE`) rather than an incremental one — there's no automated pipeline keeping the DuckDB and BigQuery raw tables in sync. Acceptable for a dataset extracted a handful of times so far; a real pipeline would fold this into the extraction step itself.
+[Automated Weekly Extraction](#automated-weekly-extraction) covers the extraction itself incrementally, but `src/load_raw_to_bigquery.py` still does a full-refresh load (`WRITE_TRUNCATE`) of the merged CSV rather than loading only the changed rows — acceptable at ~140K rows, but every run re-uploads the entire table. Separately, the extraction's `LastUpdatePostDate` filter is only as precise as the day the API reports it at, so a study edited on the same calendar day as a run could in principle be picked up a day later than expected, or occasionally refetched twice at a day boundary — harmless given the upsert-by-`nct_id` merge, but not instantaneous.
+
+### 6. The dashboard's data refresh is manual, not scheduled
+
+Power BI now connects live to BigQuery (see [Technical Architecture](#technical-architecture)), but Power BI Desktop only pulls new data when someone clicks Refresh — it never refreshes unattended. A genuinely scheduled refresh, in step with [Automated Weekly Extraction](#automated-weekly-extraction)'s weekly cadence, requires publishing the report to the Power BI Service with a Pro/PPU license, which isn't set up for this project. In the meantime, a manual refresh is a single click — down from re-exporting and reloading Parquet files, which is what this replaced.
 
 ### 7. The Power BI semantic model (relationships, DAX measures) isn't checked into the repo
 
@@ -426,15 +450,17 @@ source .venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
 ```
 
+> **Shortcut:** every step below also has a `make` target — run `make help` to see them all. `make pipeline` runs Steps 1–2 against DuckDB in one go; `make pipeline-bigquery` does the same against BigQuery, once its [setup steps](#bigquery-optional-cloud-warehouse) are done.
+
 ### Step 1 — Extract data from the API
 
 ```bash
 python src/extract_api_data.py
 ```
 
-This script connects to the ClinicalTrials.gov API v2 (no authentication required), applies filters for Phases I–IV within a correctly-parenthesized date window `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)` covering 2010–2024, and writes the results incrementally to `data/dwh_dev.duckdb`. The extraction supports checkpointing: if interrupted, it can be resumed from the last saved page.
+This script connects to the ClinicalTrials.gov API v2 (no authentication required). On a first run (no saved state yet) it applies the full filter for Phases I–IV within a correctly-parenthesized date window `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)` covering 2010–2024, writes results page-by-page to `data/raw/clinical_trials_raw.csv`, and loads them into `data/dwh_dev.duckdb`. On later runs it picks up the `LastUpdatePostDate` cutoff saved from the previous run and extracts incrementally instead — only studies that are new or changed since then, upserted into the existing CSV by `nct_id`. Pass `--full` to force a full extraction regardless of saved state. Separately from that, mid-run pagination is checkpointed: if a single run is interrupted, it resumes from the last saved page rather than restarting.
 
-Expected output: **137,556 trials** in `raw.raw_clinical_trials`.
+Expected output on a full run: **137,556 trials** in `raw.raw_clinical_trials`. See [Automated Weekly Extraction](#automated-weekly-extraction) for how this runs unattended on a schedule.
 
 ### Step 2 — Run dbt transformations
 
@@ -449,33 +475,16 @@ Expected: 14 models built, 1 seed loaded (`condition_normalization`, 3,771 rows)
 
 > Want to run this against a cloud warehouse instead of the local DuckDB file? See [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse) — same models, same commands with `-t bigquery` added.
 
-### Step 3 — Export to Parquet and build the dashboard
+### Step 3 — Connect Power BI to BigQuery and build the dashboard
 
-The Power BI file (`.pbix`) is not included in this repository as it contains derived data. To rebuild the dashboard, first export the mart tables from DuckDB to Parquet:
+The Power BI file (`.pbix`) is not included in this repository, since it contains derived data and is tied to a specific Google Cloud project. To rebuild the dashboard, first make sure the mart tables exist in BigQuery ([BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse), steps 1–6), then in Power BI Desktop:
 
-```python
-import duckdb
+1. **Get Data → Google BigQuery**, and sign in with a Google account that has read access to your project
+2. In the Navigator, import each of the 12 mart tables from the `main` dataset — `fct_clinical_trials`, the 7 `dim_*` tables, and the 4 `brg_*` bridge tables — in **Import** mode (not DirectQuery)
+3. Configure the relationships (13 total, 12 active + 1 inactive) based on the fact/dimension/bridge structure in [Technical Architecture](#technical-architecture) and `docs/SLA.md`. Model view → Manage relationships → **Autodetect** reconstructs most of these on its own, since every foreign key (`status_id`, `sponsor_id`, `phase_id`, `nct_id`, etc.) is named identically on both sides of each join
+4. Rebuild the DAX measures from the KPI and rate definitions in [Data & Methodology](#data--methodology) and `docs/SLA.md`'s KPI glossary — the measures themselves aren't checked into the repo (they live in the `.pbix`, which isn't included; see [Known Limitations](#known-limitations--future-work))
 
-con = duckdb.connect("data/dwh_dev.duckdb")
-
-tables = [
-    "fct_clinical_trials",
-    "dim_date", "dim_status", "dim_phase", "dim_sponsor",
-    "dim_condition", "dim_country", "dim_intervention_type",
-    "brg_trial_phase", "brg_trial_condition",
-    "brg_trial_country", "brg_trial_intervention"
-]
-
-for table in tables:
-    con.execute(f"COPY marts.{table} TO 'exports/{table}.parquet' (FORMAT PARQUET)")
-
-con.close()
-```
-
-Then in Power BI Desktop:
-1. Get Data → Parquet → load each file from the `exports/` folder
-2. Configure the relationships (13 total, 12 active + 1 inactive) based on the fact/dimension/bridge structure in [Technical Architecture](#technical-architecture) and `docs/SLA.md`
-3. Rebuild the DAX measures from the KPI and rate definitions in [Data & Methodology](#data--methodology) and `docs/SLA.md`'s KPI glossary — the measures themselves aren't checked into the repo (they live in the `.pbix`, which isn't included; see [Known Limitations](#known-limitations--future-work))
+Once connected, getting new data into the dashboard is a single click — **Home → Refresh** — no export step in between.
 
 ---
 
@@ -483,6 +492,11 @@ Then in Power BI Desktop:
 
 ```
 clinical_trials_analysis/
+├── .github/
+│   ├── workflows/
+│   │   └── scheduled_extraction.yml  # weekly incremental extraction -> BigQuery -> dbt build
+│   └── dbt/
+│       └── profiles.yml              # CI-only dbt profile (BigQuery target, no credentials)
 ├── dbt_project/
 │   ├── models/
 │   │   ├── staging/         # stg_clinical_trials (+ date range validation)
@@ -516,4 +530,4 @@ clinical_trials_analysis/
 Data Analytics · Analytics Engineering
 [GitHub](https://github.com/adriansoriacastellano)
 
-*Background in Neuroscience (BSc + MSc). Transitioning into Data Analytics and Analytics Engineering. Currently building analytics engineering projects. Open to Data Analyst and Analytics Engineer roles.*
+*Neuroscience background (BSc + MSc), now focused on Data Analytics and Analytics Engineering — this project reflects that shift in practice. Open to Data Analyst and Analytics Engineer roles.*
