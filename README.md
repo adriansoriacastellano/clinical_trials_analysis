@@ -450,7 +450,7 @@ source .venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
 ```
 
-> **Shortcut:** every step below also has a `make` target — run `make help` to see them all. `make pipeline` runs Steps 1–2 against DuckDB in one go; `make pipeline-bigquery` does the same against BigQuery (steps 5–6 below).
+> **Shortcut:** every step below also has a `make` target — run `make help` to see them all. `make pipeline` runs Steps 1–2 against DuckDB in one go; `make pipeline-bigquery` does the same against BigQuery, once its [setup steps](#bigquery-optional-cloud-warehouse) are done.
 
 ### Step 1 — Extract data from the API
 
