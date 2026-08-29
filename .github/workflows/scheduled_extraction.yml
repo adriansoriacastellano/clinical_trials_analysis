@@ -61,7 +61,7 @@ jobs:
         env:
           BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
           BIGQUERY_KEYFILE: ${{ runner.temp }}/gcp-key.json
-          BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
+          BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET || 'main' }}
         run: python src/load_raw_to_bigquery.py
 
       # dbt build (not dbt run) deliberately: it runs seeds + models + tests in one
@@ -73,7 +73,7 @@ jobs:
         env:
           BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
           BIGQUERY_KEYFILE: ${{ runner.temp }}/gcp-key.json
-          BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET }}
+          BIGQUERY_DATASET: ${{ vars.BIGQUERY_DATASET || 'main' }}
           DBT_PROFILES_DIR: ${{ github.workspace }}/.github/dbt
         run: dbt build -t bigquery
 
