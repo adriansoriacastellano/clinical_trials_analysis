@@ -93,9 +93,13 @@ def ensure_dataset(client, dataset_id, location):
 def main():
     project = require_env("BIGQUERY_PROJECT")
     keyfile = require_env("BIGQUERY_KEYFILE")
-    raw_dataset = os.environ.get("RAW_DATASET", "raw")
-    main_dataset = os.environ.get("BIGQUERY_DATASET", "main")
-    location = os.environ.get("BIGQUERY_LOCATION", "US")
+    # `or` rather than .get(name, default): an env var that's set but empty
+    # (e.g. an unfilled optional GitHub Actions repository variable, which
+    # substitutes as "" rather than being absent) should still fall back to
+    # the default, not silently pass "" through to the BigQuery API.
+    raw_dataset = os.environ.get("RAW_DATASET") or "raw"
+    main_dataset = os.environ.get("BIGQUERY_DATASET") or "main"
+    location = os.environ.get("BIGQUERY_LOCATION") or "US"
 
     if not RAW_CSV.exists():
         sys.exit(f"{RAW_CSV} not found - run src/extract_api_data.py first.")
