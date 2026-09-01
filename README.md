@@ -254,7 +254,7 @@ Each run:
 
 ## A Live View: Streamlit + BigQuery
 
-**[Live app →](STREAMLIT_APP_URL_PLACEHOLDER)**
+**[Live app →](https://clinical-trials-analysis.streamlit.app/)**
 
 **Why this exists:** the Power BI dashboard in this README is screenshots — static PNGs, not something a visitor can click. This app is where the project is actually interactive: a [Streamlit](https://streamlit.io/) app ([`streamlit_app/`](streamlit_app/)) covering the same ground as the 3 Power BI pages (Overview, Factors I, Factors II) plus a 4th with no static equivalent, reading live from BigQuery instead of a Parquet export.
 
