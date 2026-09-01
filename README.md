@@ -156,7 +156,7 @@ dbt docs generate -t dev
 
 ## BigQuery (Optional Cloud Warehouse)
 
-By default this project runs entirely locally against DuckDB (the `dev` target) — no cloud account needed to clone and run it. A second dbt target, `bigquery`, runs the **same 14 models** against a real cloud data warehouse instead, to show the local-to-cloud path without giving up the zero-cost, zero-setup default. `dbt run`/`dbt test` against `bigquery` produce identical results to `dev`: 48/48 tests passing, and every mart table matching row-for-row (including the 55.2% headline completion rate).
+By default this project runs entirely locally against DuckDB (the `dev` target) — no cloud account needed to clone and run it. A second dbt target, `bigquery`, runs the **same 14 models** against a real cloud data warehouse instead, to show the local-to-cloud path without giving up the zero-cost, zero-setup default. At the time this target was added and verified, `dbt run`/`dbt test` against `bigquery` produced identical results to `dev`: 48/48 tests passing, and every mart table matching row-for-row — confirming the SQL itself is portable, not just that it runs. Since [Automated Weekly Extraction](#automated-weekly-extraction) started refreshing BigQuery on its own schedule, the two targets' *data* will drift apart over time even though the *models* stay identical; see the snapshot note in [Key Findings](#key-findings).
 
 ### 1. Create a GCP project and enable BigQuery
 1. Create a project at [console.cloud.google.com](https://console.cloud.google.com/).
@@ -251,6 +251,8 @@ Each run:
 ## Key Findings
 
 Each finding below is backed by a chi-square test of independence (categorical factor vs. completion/abandonment) and, for its headline comparison, a two-proportion z-test with a 95% confidence interval — both computed independently in [`notebooks/01_exploration_SLA.ipynb`, Section 8](notebooks/01_exploration_SLA.ipynb). With 137,556 trials, p-values are almost always extremely small regardless of how much a factor actually matters in practice, so the notebook also reports effect sizes (Cramér's V) — treat those, not the p-values alone, as the signal of practical importance.
+
+> **Data snapshot:** every figure below comes from a single extraction completed on **2026-06-30** (137,556 trials) — the same dataset behind the statistical validation notebook and the dashboard screenshots, all internally consistent with each other. BigQuery has since moved past this snapshot on its own weekly schedule (see [Automated Weekly Extraction](#automated-weekly-extraction)) and will show slightly different totals if you query it directly; the local DuckDB warehouse still matches every number below exactly, since nothing refreshes it automatically.
 
 ### Global KPIs
 
