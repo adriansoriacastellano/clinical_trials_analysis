@@ -4,7 +4,7 @@ Power BI dashboard, but live and filterable."""
 import plotly.graph_objects as go
 import streamlit as st
 
-from data import get_rates_by_condition, get_rates_by_country, get_rates_by_enrollment_band
+from data import fetch_parallel, get_rates_by_condition, get_rates_by_country, get_rates_by_enrollment_band
 from filters import render_sidebar_filters
 from theme import NAVY_SEQUENTIAL, apply_custom_css, apply_layout, page_header, rate_comparison_bar
 
@@ -18,8 +18,15 @@ page_header(
 
 filters = render_sidebar_filters()
 
+# 3 independent queries, fired concurrently rather than one at a time.
+results = fetch_parallel(
+    enrollment=lambda: get_rates_by_enrollment_band(filters),
+    condition=lambda: get_rates_by_condition(filters),
+    country=lambda: get_rates_by_country(filters, top_n=4),
+)
+
 st.subheader("By Enrollment Band")
-df_enrollment = get_rates_by_enrollment_band(filters)
+df_enrollment = results["enrollment"]
 if df_enrollment.empty:
     st.info("No trials with a reported enrollment count match the current filters.")
 else:
@@ -31,14 +38,14 @@ else:
 
 st.subheader("By Therapeutic Area")
 st.caption("Conditions with ≥1,000 trials, excluding non-medical 'healthy volunteer' studies.")
-df_condition = get_rates_by_condition(filters)
+df_condition = results["condition"]
 if df_condition.empty:
     st.info("No condition clears the 1,000-trial threshold with the current filters.")
 else:
     st.plotly_chart(rate_comparison_bar(df_condition, "condition_name"), use_container_width=True)
 
 st.subheader("By Country")
-df_country = get_rates_by_country(filters, top_n=4)
+df_country = results["country"]
 if df_country.empty:
     st.info("No trials match the current filters.")
 else:

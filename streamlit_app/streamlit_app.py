@@ -10,7 +10,7 @@ filters in the sidebar.
 import plotly.graph_objects as go
 import streamlit as st
 
-from data import get_completion_by_start_year, get_global_kpis, get_status_distribution
+from data import fetch_parallel, get_completion_by_start_year, get_global_kpis, get_status_distribution
 from filters import render_sidebar_filters
 from theme import MINT, NAVY, NAVY_SEQUENTIAL, apply_custom_css, apply_layout, page_header
 
@@ -27,7 +27,14 @@ page_header(
 
 try:
     filters = render_sidebar_filters()
-    kpis = get_global_kpis(filters)
+    # The 3 queries below are independent - fired concurrently instead of one
+    # at a time, since each is its own BigQuery round trip.
+    results = fetch_parallel(
+        kpis=lambda: get_global_kpis(filters),
+        year=lambda: get_completion_by_start_year(filters),
+        status=lambda: get_status_distribution(filters),
+    )
+    kpis = results["kpis"]
 except Exception as exc:
     st.error(
         "Couldn't reach BigQuery. If you're running this locally, check "
@@ -59,7 +66,7 @@ st.divider()
 # gives them room.
 
 st.subheader("Completion Rate (Concluded) by Year")
-df_year = get_completion_by_start_year(filters)
+df_year = results["year"]
 if df_year.empty:
     st.info("No concluded trials with at least 30 trials in a year match the current filters.")
 else:
@@ -85,7 +92,7 @@ else:
     )
 
 st.subheader("Trials by Status")
-df_status = get_status_distribution(filters)
+df_status = results["status"]
 if df_status.empty:
     st.info("No trials match the current filters.")
 else:
