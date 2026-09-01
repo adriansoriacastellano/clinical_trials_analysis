@@ -16,6 +16,7 @@ An end-to-end analytics engineering pipeline: API ingestion → dimensional data
 - [dbt Documentation](#dbt-documentation)
 - [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)
 - [Automated Weekly Extraction](#automated-weekly-extraction)
+- [A Live View: Streamlit + BigQuery](#a-live-view-streamlit--bigquery)
 - [Key Findings](#key-findings)
 - [Dashboard](#dashboard)
 - [Known Limitations & Future Work](#known-limitations--future-work)
@@ -112,11 +113,13 @@ ClinicalTrials.gov API v2
   └── Bridges:      brg_trial_phase · brg_trial_condition
                      brg_trial_country · brg_trial_intervention
          │
-         ▼ (dashboard reads the bigquery target's marts — see Automated Weekly Extraction)
-  Power BI Desktop — live Google BigQuery connector (Import mode)
-  ├── Semantic model (13 relationships, 12 active + 1 inactive)
-  ├── 15 DAX measures
-  └── 3-page interactive dashboard
+         ▼ (both dashboards read the bigquery target's marts — see Automated Weekly Extraction)
+  ├── Power BI Desktop — live Google BigQuery connector (Import mode)
+  │   ├── Semantic model (13 relationships, 12 active + 1 inactive)
+  │   ├── 15 DAX measures
+  │   └── 3-page interactive dashboard
+  └── Streamlit + Plotly — public, live, deployed on Streamlit Community Cloud
+      └── same 3 pages, no manual refresh needed (see A Live View below)
 
 > **EDA:** Before building the dashboard, a full exploratory analysis was conducted in `notebooks/01_exploration_SLA.ipynb`. Every metric is computed independently against DuckDB — not against Power BI — and compared to the dashboard values as a tie-out check, catching discrepancies rather than assuming the dashboard is correct by default.
 ```
@@ -129,8 +132,9 @@ ClinicalTrials.gov API v2
 | DuckDB | Local data warehouse (default) |
 | dbt Core | Transformations, data quality tests, lineage |
 | Power BI Desktop | Dashboard and semantic model, connected live to BigQuery |
+| Streamlit + Plotly | Public live dashboard, same data, no Desktop install needed |
 | DBeaver | Independent SQL verification of dashboard numbers |
-| BigQuery | Cloud warehouse target — same 14 models, no code fork; also what the dashboard reads from |
+| BigQuery | Cloud warehouse target — same 14 models, no code fork; what both dashboards read from |
 | Git + GitHub | Version control and public portfolio |
 
 > **Note on Power BI connectivity:** Power BI connects live to BigQuery via the native Google BigQuery connector (Import mode) — no export step, no ODBC driver. This wasn't the first approach: a direct DuckDB ODBC connection was attempted first (blocked by a path issue when connecting from WSL2, then a hang even after copying the database file to the Windows filesystem to rule that out), and a Parquet export was used as a working interim step while BigQuery didn't exist yet. Once the `bigquery` dbt target was added and verified row-for-row identical to DuckDB (see [BigQuery (Optional Cloud Warehouse)](#bigquery-optional-cloud-warehouse)), the dashboard's source was switched to it directly and the Parquet step was removed.
@@ -245,6 +249,20 @@ Each run:
 **Error handling:** each API page request retries up to 3 times with backoff before giving up. Both scripts log to stdout with timestamps and wrap their entry point in a try/except that logs the full traceback and exits non-zero on any failure, so a broken run shows as a red ✗ in the Actions tab with the actual error visible in the failed step's log.
 
 **A known tradeoff:** the incremental cutoff lives in a GitHub Actions cache entry rather than a database or a file committed back to `main`, specifically so this workflow never needs write access to `main`. Caches can be evicted (7 days unused, or under storage pressure against the repo's 10 GB cache limit); if that happens, the next run silently falls back to a full extraction instead of failing — slower, but not incorrect, since the upsert-by-`nct_id` merge is idempotent either way.
+
+---
+
+## A Live View: Streamlit + BigQuery
+
+**[Live app →](STREAMLIT_APP_URL_PLACEHOLDER)**
+
+A [Streamlit](https://streamlit.io/) app ([`streamlit_app/`](streamlit_app/)) mirrors the 3 pages of the Power BI dashboard — Overview, Factors I, Factors II — reading live from BigQuery instead of a static Parquet export. It exists specifically to answer "does this dashboard show current data?": Power BI needs a manual click and a Desktop install to check (see [Known Limitations #6](#6-the-dashboards-data-refresh-is-manual-not-scheduled)); this is a public link, always querying whatever [Automated Weekly Extraction](#automated-weekly-extraction) most recently landed in BigQuery.
+
+**Why a second dashboard instead of just fixing Power BI's refresh:** the `.pbix` isn't in this repo (see [Known Limitations #7](#7-the-power-bi-semantic-model-relationships-dax-measures-isnt-checked-into-the-repo)) and Power BI Service scheduled refresh needs a Pro/PPU license this project doesn't have — both are real constraints, not solved by this app. What Streamlit *does* solve is having something publicly clickable at all: Power BI Desktop's file isn't shareable as a link the way this is.
+
+**Stack:** [Plotly](https://plotly.com/python/) for charts (the same navy/mint pair as Power BI, validated with the [dataviz-skill](streamlit_app/theme.py) color checks for contrast and colorblind-safe separation), a dedicated `google-cloud-bigquery` client with `st.cache_data`/`st.cache_resource` (queries only re-run once an hour, not on every page view), and a deliberately minimal [`streamlit_app/requirements.txt`](streamlit_app/requirements.txt) separate from the root one (no dbt, no Jupyter — faster Streamlit Cloud builds).
+
+**Deployed on [Streamlit Community Cloud](https://streamlit.io/cloud)** (free tier) — see [`streamlit_app/README.md`](streamlit_app/README.md) for local setup and secrets configuration.
 
 ---
 
@@ -419,7 +437,7 @@ The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `g
 
 ### 6. The dashboard's data refresh is manual, not scheduled
 
-Power BI now connects live to BigQuery (see [Technical Architecture](#technical-architecture)), but Power BI Desktop only pulls new data when someone clicks Refresh — it never refreshes unattended. A genuinely scheduled refresh, in step with [Automated Weekly Extraction](#automated-weekly-extraction)'s weekly cadence, requires publishing the report to the Power BI Service with a Pro/PPU license, which isn't set up for this project. In the meantime, a manual refresh is a single click — down from re-exporting and reloading Parquet files, which is what this replaced.
+Power BI now connects live to BigQuery (see [Technical Architecture](#technical-architecture)), but Power BI Desktop only pulls new data when someone clicks Refresh — it never refreshes unattended. A genuinely scheduled refresh, in step with [Automated Weekly Extraction](#automated-weekly-extraction)'s weekly cadence, requires publishing the report to the Power BI Service with a Pro/PPU license, which isn't set up for this project. In the meantime, a manual refresh is a single click — down from re-exporting and reloading Parquet files, which is what this replaced. This specific limitation is what [the Streamlit dashboard](#a-live-view-streamlit--bigquery) is for: it has no refresh button because it doesn't need one — every page load queries BigQuery directly.
 
 ### 7. The Power BI semantic model (relationships, DAX measures) isn't checked into the repo
 
@@ -499,6 +517,15 @@ clinical_trials_analysis/
 │   │   └── scheduled_extraction.yml  # weekly incremental extraction -> BigQuery -> dbt build
 │   └── dbt/
 │       └── profiles.yml              # CI-only dbt profile (BigQuery target, no credentials)
+├── .streamlit/
+│   ├── config.toml                   # pinned light theme, matches the validated palette
+│   └── secrets.toml.example          # template for local BigQuery credentials
+├── streamlit_app/
+│   ├── streamlit_app.py              # Overview page
+│   ├── pages/                        # Factors I, Factors II
+│   ├── data.py                       # BigQuery client + queries, cached
+│   ├── theme.py                      # navy/mint palette + shared Plotly layout
+│   └── requirements.txt              # minimal, separate from the root one
 ├── dbt_project/
 │   ├── models/
 │   │   ├── staging/         # stg_clinical_trials (+ date range validation)

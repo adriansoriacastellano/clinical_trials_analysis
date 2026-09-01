@@ -1,0 +1,10 @@
+# Pinned to light: the navy/mint palette in streamlit_app/theme.py was validated
+# against a light chart surface only (see the docstring there). Letting the app
+# follow a viewer's dark OS preference would silently break that contrast check.
+[theme]
+base = "light"
+primaryColor = "#215E92"
+backgroundColor = "#FCFCFB"
+secondaryBackgroundColor = "#F0F3F6"
+textColor = "#0B0B0B"
+font = "sans serif"
