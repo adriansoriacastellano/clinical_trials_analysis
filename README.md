@@ -256,11 +256,15 @@ Each run:
 
 **[Live app →](STREAMLIT_APP_URL_PLACEHOLDER)**
 
-A [Streamlit](https://streamlit.io/) app ([`streamlit_app/`](streamlit_app/)) mirrors the 3 pages of the Power BI dashboard — Overview, Factors I, Factors II — reading live from BigQuery instead of a static Parquet export. It exists specifically to answer "does this dashboard show current data?": Power BI needs a manual click and a Desktop install to check (see [Known Limitations #6](#6-the-dashboards-data-refresh-is-manual-not-scheduled)); this is a public link, always querying whatever [Automated Weekly Extraction](#automated-weekly-extraction) most recently landed in BigQuery.
+**Why this exists:** the Power BI dashboard in this README is screenshots — static PNGs, not something a visitor can click. This app is where the project is actually interactive: a [Streamlit](https://streamlit.io/) app ([`streamlit_app/`](streamlit_app/)) covering the same ground as the 3 Power BI pages (Overview, Factors I, Factors II) plus a 4th with no static equivalent, reading live from BigQuery instead of a Parquet export.
 
-**Why a second dashboard instead of just fixing Power BI's refresh:** the `.pbix` isn't in this repo (see [Known Limitations #7](#7-the-power-bi-semantic-model-relationships-dax-measures-isnt-checked-into-the-repo)) and Power BI Service scheduled refresh needs a Pro/PPU license this project doesn't have — both are real constraints, not solved by this app. What Streamlit *does* solve is having something publicly clickable at all: Power BI Desktop's file isn't shareable as a link the way this is.
+- **Live sidebar filters** (year range, country, phase, sponsor class) apply across all 4 pages as a real SQL `WHERE` on every query — not a client-side re-slice of a table fetched once. Pick "Phase III, Industry, 2015–2020" and every chart on every page reflects it.
+- **Cross-Factor Explorer** (4th page): pick any two factors and see completion rate across their intersection as a live heatmap — a view that literally cannot exist as a static screenshot, since it's one of dozens of possible combinations computed on demand.
+- Always querying whatever [Automated Weekly Extraction](#automated-weekly-extraction) most recently landed in BigQuery — Power BI needs a manual click and a Desktop install to check for new data (see [Known Limitations #6](#6-the-dashboards-data-refresh-is-manual-not-scheduled)); this is a public link, always current.
 
-**Stack:** [Plotly](https://plotly.com/python/) for charts (the same navy/mint pair as Power BI, validated with the [dataviz-skill](streamlit_app/theme.py) color checks for contrast and colorblind-safe separation), a dedicated `google-cloud-bigquery` client with `st.cache_data`/`st.cache_resource` (queries only re-run once an hour, not on every page view), and a deliberately minimal [`streamlit_app/requirements.txt`](streamlit_app/requirements.txt) separate from the root one (no dbt, no Jupyter — faster Streamlit Cloud builds).
+**Why a second dashboard instead of just fixing Power BI's refresh:** the `.pbix` isn't in this repo (see [Known Limitations #7](#7-the-power-bi-semantic-model-relationships-dax-measures-isnt-checked-into-the-repo)) and Power BI Service scheduled refresh needs a Pro/PPU license this project doesn't have — both are real constraints, not solved by this app. What Streamlit *does* solve is having something publicly clickable and interactive at all: Power BI Desktop's file isn't shareable as a link the way this is, and its screenshots can't respond to a filter.
+
+**Stack:** [Plotly](https://plotly.com/python/) for charts (the same navy/mint pair as Power BI, validated with the [dataviz-skill](streamlit_app/theme.py) color checks for contrast and colorblind-safe separation), a dedicated `google-cloud-bigquery` client with `st.cache_data`/`st.cache_resource` (queries only re-run once an hour per distinct filter combination, not on every page view), and a deliberately minimal [`streamlit_app/requirements.txt`](streamlit_app/requirements.txt) separate from the root one (no dbt, no Jupyter — faster Streamlit Cloud builds).
 
 **Deployed on [Streamlit Community Cloud](https://streamlit.io/cloud)** (free tier) — see [`streamlit_app/README.md`](streamlit_app/README.md) for local setup and secrets configuration.
 
@@ -522,9 +526,10 @@ clinical_trials_analysis/
 │   └── secrets.toml.example          # template for local BigQuery credentials
 ├── streamlit_app/
 │   ├── streamlit_app.py              # Overview page
-│   ├── pages/                        # Factors I, Factors II
-│   ├── data.py                       # BigQuery client + queries, cached
-│   ├── theme.py                      # navy/mint palette + shared Plotly layout
+│   ├── pages/                        # Factors I, Factors II, Cross-Factor Explorer
+│   ├── data.py                       # BigQuery client + filter-aware queries, cached
+│   ├── filters.py                    # sidebar filters shared across pages
+│   ├── theme.py                      # navy/mint palette, custom CSS, shared Plotly layout
 │   └── requirements.txt              # minimal, separate from the root one
 ├── dbt_project/
 │   ├── models/

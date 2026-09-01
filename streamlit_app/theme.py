@@ -1,5 +1,5 @@
 """
-Shared color palette and Plotly layout defaults for every page.
+Shared color palette, Plotly layout defaults, and light CSS for every page.
 
 Palette: navy + mint, chosen to match the existing Power BI dashboard for visual
 continuity across the portfolio. Validated as a categorical pair with the
@@ -13,20 +13,26 @@ the same two hex values were not re-validated against a dark surface.
 Charts here almost never need more than these two hues: nearly every chart is
 "completion rate vs. abandonment rate" *by* some category, so color encodes the
 metric (2 series, navy/mint), not the category - the category sits on the axis
-instead. The one chart that genuinely encodes a category by color (status
-distribution) intentionally uses a single hue (see NAVY_SEQUENTIAL) rather than
-inventing more categorical colors, precisely because the pair above was only
-validated as a 2-slot palette.
+instead. The status-distribution and Cross-Factor Explorer charts intentionally
+use a single-hue sequential ramp (NAVY_SEQUENTIAL) rather than inventing more
+categorical colors, precisely because the pair above was only validated as a
+2-slot categorical palette, not a wider one.
 """
 
 import plotly.graph_objects as go
+import streamlit as st
 
 NAVY = "#215E92"
 MINT = "#1F9E82"
 
 # Light-to-dark steps of the same navy hue, for magnitude-only charts (a status
-# breakdown, a top-N donut) where color encodes "how much", not "which series".
+# breakdown, a top-N donut, a heatmap) where color encodes "how much", not
+# "which series".
 NAVY_SEQUENTIAL = ["#CDE0F0", "#9FC2DE", "#6FA3CB", "#3F84B8", "#215E92", "#164569"]
+NAVY_COLORSCALE = [
+    [0.0, "#F3F7FB"], [0.2, "#CDE0F0"], [0.4, "#9FC2DE"],
+    [0.6, "#6FA3CB"], [0.8, "#3F84B8"], [1.0, "#164569"],
+]
 
 SURFACE = "#FCFCFB"
 GRID = "#E1E0D9"
@@ -34,6 +40,51 @@ TEXT_PRIMARY = "#0B0B0B"
 TEXT_MUTED = "#6B6A65"
 
 FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', sans-serif"
+
+
+def apply_custom_css():
+    """A page's-worth of visual polish that Streamlit's defaults don't give you
+    for free: tabular figures on metrics (so digits line up), a firmer metric
+    label style, and card-style borders that read as "dashboard" rather than
+    "default Streamlit app". Targets Streamlit's own documented data-testid
+    hooks (stable across versions) rather than internal class names."""
+    st.markdown(f"""
+        <style>
+        [data-testid="stMetric"] {{
+            background: white;
+            border: 1px solid {GRID};
+            border-radius: 10px;
+            padding: 14px 16px 10px 16px;
+        }}
+        [data-testid="stMetricValue"] {{
+            font-variant-numeric: tabular-nums;
+            color: {NAVY};
+        }}
+        [data-testid="stMetricLabel"] {{
+            font-size: 0.80rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: {TEXT_MUTED};
+        }}
+        h2, h3 {{
+            color: {TEXT_PRIMARY};
+        }}
+        </style>
+    """, unsafe_allow_html=True)
+
+
+def page_header(title, subtitle, icon=""):
+    """A banded header instead of a plain st.title — the one deliberately
+    branded element on every page, in the same navy as the charts."""
+    st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, {NAVY} 0%, #163F63 100%);
+            border-radius: 12px; padding: 22px 26px; margin-bottom: 20px;
+        ">
+            <div style="color: white; font-size: 1.6rem; font-weight: 700;">{icon} {title}</div>
+            <div style="color: #CFE0EF; font-size: 0.95rem; margin-top: 4px;">{subtitle}</div>
+        </div>
+    """, unsafe_allow_html=True)
 
 
 def apply_layout(fig, title=None, height=420, showlegend=True):
@@ -76,4 +127,23 @@ def rate_comparison_bar(df, label_col, title=None, height=440):
     fig.update_layout(barmode="group")
     fig.update_yaxes(title="Rate (%)")
     apply_layout(fig, title=title, height=height)
+    return fig
+
+
+def heatmap_chart(pivot_df, colorbar_title="Completion rate (%)", height=460):
+    """pivot_df: a DataFrame already shaped rows=dim_a, cols=dim_b, values=rate."""
+    fig = go.Figure(go.Heatmap(
+        z=pivot_df.values,
+        x=pivot_df.columns.tolist(),
+        y=pivot_df.index.tolist(),
+        colorscale=NAVY_COLORSCALE,
+        text=pivot_df.values,
+        texttemplate="%{text:.0f}%",
+        textfont=dict(size=12),
+        colorbar=dict(title=colorbar_title, ticksuffix="%"),
+        xgap=3, ygap=3,
+    ))
+    apply_layout(fig, showlegend=False, height=height)
+    fig.update_xaxes(showgrid=False, side="bottom")
+    fig.update_yaxes(showgrid=False, autorange="reversed")
     return fig
