@@ -51,8 +51,12 @@ jobs:
           restore-keys: |
             extraction-state-
 
+      # --skip-duckdb: this runner's data/dwh_dev.duckdb is thrown away with it at
+      # the end of the job and never read (the dbt step below targets bigquery
+      # only) - building it here would be pure wasted work, not a second copy of
+      # anything meaningful.
       - name: Run extraction
-        run: python src/extract_api_data.py ${{ inputs.full && '--full' || '' }}
+        run: python src/extract_api_data.py --skip-duckdb ${{ inputs.full && '--full' || '' }}
 
       - name: Write GCP service account key
         run: echo '${{ secrets.GCP_SA_KEY }}' > "${{ runner.temp }}/gcp-key.json"

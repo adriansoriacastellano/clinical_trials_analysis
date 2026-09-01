@@ -44,6 +44,15 @@ def parse_args():
             "el estado de la ultima extraccion incremental."
         ),
     )
+    parser.add_argument(
+        "--skip-duckdb",
+        action="store_true",
+        help=(
+            "No reconstruir data/dwh_dev.duckdb al final. Pensado para el workflow "
+            "de GitHub Actions, donde el CSV solo se usa para cargar a BigQuery y "
+            "nadie lee el DuckDB del runner efimero."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -368,6 +377,10 @@ def main():
             "Estado guardado: la proxima extraccion incremental partira de LastUpdatePostDate >= %s",
             max_last_update,
         )
+
+    if args.skip_duckdb:
+        logger.info("--skip-duckdb: omitiendo la reconstruccion de %s.", DB_PATH)
+        return
 
     logger.info("Cargando datos en DuckDB desde %s...", OUTPUT_CSV)
     import duckdb
