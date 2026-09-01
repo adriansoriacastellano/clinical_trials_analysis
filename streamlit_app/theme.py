@@ -91,8 +91,7 @@ def apply_layout(fig, title=None, height=420, showlegend=True):
     """Applies one consistent look to every chart in the app: same font, same
     muted gridlines, same margins - so the dashboard reads as one system rather
     than a pile of default-themed Plotly charts."""
-    fig.update_layout(
-        title=title,
+    layout_kwargs = dict(
         height=height,
         showlegend=showlegend,
         plot_bgcolor=SURFACE,
@@ -100,9 +99,15 @@ def apply_layout(fig, title=None, height=420, showlegend=True):
         font=dict(family=FONT_FAMILY, color=TEXT_PRIMARY, size=13),
         title_font=dict(size=16, color=TEXT_PRIMARY),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=10, r=10, t=60 if title else 30, b=10),
+        margin=dict(l=10, r=50, t=60 if title else 30, b=10),
         hoverlabel=dict(bgcolor="white", font_size=12, font_family=FONT_FAMILY),
     )
+    # Passing title=None explicitly (rather than just omitting the key) renders
+    # as the literal text "undefined" on the chart in this Plotly version - so
+    # the key is only set at all when there's a real title to show.
+    if title:
+        layout_kwargs["title"] = title
+    fig.update_layout(**layout_kwargs)
     fig.update_xaxes(showgrid=False, linecolor=GRID, tickfont=dict(color=TEXT_MUTED))
     fig.update_yaxes(showgrid=True, gridcolor=GRID, tickfont=dict(color=TEXT_MUTED))
     return fig

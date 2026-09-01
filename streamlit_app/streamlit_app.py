@@ -57,7 +57,7 @@ st.divider()
 col_left, col_right = st.columns([3, 2])
 
 with col_left:
-    st.subheader("Completion Rate by Start Year (Concluded trials)")
+    st.subheader("Completion Rate (Concluded) by Year")
     df_year = get_completion_by_start_year(filters)
     if df_year.empty:
         st.info("No concluded trials with at least 30 trials in a year match the current filters.")
@@ -68,10 +68,10 @@ with col_left:
             mode="lines+markers", name="Completion rate",
             line=dict(color=NAVY, width=3), marker=dict(size=7, color=NAVY),
         ))
-        for ref, label in [(70, "70% reference"), (85, "85% reference")]:
+        for ref in (70, 85):
             fig.add_hline(
                 y=ref, line_dash="dash", line_color=MINT, opacity=0.7,
-                annotation_text=label, annotation_position="right",
+                annotation_text=f"{ref}%", annotation_position="right",
             )
         fig.update_yaxes(title="Completion rate (%)", range=[0, 100])
         fig.update_xaxes(title="Trial start year", dtick=1)
