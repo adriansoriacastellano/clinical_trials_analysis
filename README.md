@@ -449,6 +449,10 @@ The `.pbix` file is excluded (see [How to Reproduce](#how-to-reproduce)), so the
 
 **Proposed solution:** export the semantic model's relationships and measures (Power BI supports exporting DAX definitions via Tabular Editor or `.bim` extraction) into a versioned file in `docs/`.
 
+### 8. Findings are univariate/bivariate, not controlled for confounding factors
+
+Each finding in [Key Findings](#key-findings) tests one factor against completion in isolation (chi-square, Cramér's V, two-proportion z-tests). None of them control for the other five factors, so a factor with a strong raw association — Sponsor Class, say — could partly be standing in for a correlated one, like Country. The statistically correct next step would be a multivariate logistic regression (or, given the censored/ongoing trials in this dataset, survival analysis); scoped out deliberately, as the added rigor targets a narrower audience than this portfolio's.
+
 ---
 
 ## How to Reproduce
