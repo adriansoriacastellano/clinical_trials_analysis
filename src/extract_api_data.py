@@ -247,6 +247,22 @@ def append_rows_to_csv(rows, write_header):
             f.write(",".join(safe_csv_value(row.get(c)) for c in COLUMNS) + "\n")
 
 
+# Columns BigQuery (and DuckDB) expect as whole numbers. A DataFrame holding a
+# missing value in one of these turns it into float64, which to_csv writes as
+# "30.0" - rejected by an INT64 column.
+INT_COLUMNS = ["enrollment_count", "locations_count"]
+
+
+def normalize_int_columns(df):
+    """Rewrites INT_COLUMNS as plain integer strings ("" for missing). Applied to the
+    whole merged frame, not just the new rows, so values already contaminated with
+    a ".0" suffix in a previously saved CSV heal themselves on the next run."""
+    for col in INT_COLUMNS:
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        df[col] = numeric.map(lambda v: "" if pd.isna(v) else str(int(v)))
+    return df
+
+
 def merge_into_csv(new_rows):
     """Upserts new_rows into the existing full CSV by nct_id (studies that already
     exist are replaced with their updated version; new nct_ids are appended). The
@@ -260,6 +276,7 @@ def merge_into_csv(new_rows):
         combined = pd.concat([existing_df, new_df], ignore_index=True)
     else:
         combined = new_df
+    combined = normalize_int_columns(combined)
     OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     combined.to_csv(OUTPUT_CSV, index=False, quoting=csv.QUOTE_ALL)
     return len(combined)
