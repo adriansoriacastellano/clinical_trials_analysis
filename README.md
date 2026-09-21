@@ -2,9 +2,9 @@
 
 **What determines whether a clinical trial completes or is abandoned?**
 
-An end-to-end data analytics project exploring completion and abandonment patterns across 137,556 clinical trials registered in ClinicalTrials.gov (Phases I–IV, 2010–2024).
+An end-to-end analytics engineering project exploring completion and abandonment patterns across 137,556 clinical trials registered in ClinicalTrials.gov (Phases I–IV, 2010–2024, as of the 2026-06-30 snapshot): API ingestion → dimensional data warehouse → interactive dashboards.
 
-An end-to-end analytics engineering pipeline: API ingestion → dimensional data warehouse → interactive dashboard.
+**[Try the live interactive dashboard →](https://clinical-trials-analysis.streamlit.app/)**
 
 ---
 
@@ -33,7 +33,7 @@ Clinical trial completion is one of the most resource-intensive problems in drug
 > Which factors — trial phase, intervention type, sponsor type, therapeutic area, enrollment size, and country — determine whether a clinical trial registered in ClinicalTrials.gov reaches completion or is abandoned/suspended?
 
 **Data source:** [ClinicalTrials.gov API v2](https://clinicaltrials.gov/data-api/api) (public, no authentication required)
-**Scope:** Phases I–IV · 2010–2024 · 137,556 trials
+**Scope:** Phases I–IV · 2010–2024 · 137,556 trials (2026-06-30 snapshot — see [Key Findings](#key-findings))
 
 ---
 
@@ -95,7 +95,7 @@ ClinicalTrials.gov API v2
   Python (extract_api_data.py)
   ├── Incremental saving with checkpoint/resume (WSL2 stability)
   ├── Date filter: (StartDate) AND (Phase1 OR Phase2 OR Phase3 OR Phase4)
-  └── 137,556 records → raw JSON
+  └── 137,556 records → raw CSV
          │
          ▼
   DuckDB (dwh_dev.duckdb) — default, local, zero-setup
@@ -119,10 +119,10 @@ ClinicalTrials.gov API v2
   │   ├── 15 DAX measures
   │   └── 3-page interactive dashboard
   └── Streamlit + Plotly — public, live, deployed on Streamlit Community Cloud
-      └── same 3 pages, no manual refresh needed (see A Live View below)
+      └── same 3 pages + a Cross-Factor Explorer, no manual refresh needed (see A Live View below)
+```
 
 > **EDA:** Before building the dashboard, a full exploratory analysis was conducted in `notebooks/01_exploration_SLA.ipynb`. Every metric is computed independently against DuckDB — not against Power BI — and compared to the dashboard values as a tie-out check, catching discrepancies rather than assuming the dashboard is correct by default.
-```
 
 **Stack:**
 
@@ -143,11 +143,11 @@ ClinicalTrials.gov API v2
 
 ## dbt Documentation
 
-The full dbt project documentation — model lineage graph (DAG), column-level descriptions, test coverage, and source freshness — is published at:
+The full dbt project documentation — model lineage graph (DAG), column-level descriptions, and test coverage — is published at:
 
 **[adriansoriacastellano.github.io/clinical_trials_analysis](https://adriansoriacastellano.github.io/clinical_trials_analysis/)**
 
-It's generated with `dbt docs generate` and served as a static site from the `gh-pages` branch, kept separate from `main` so regenerating it doesn't add noise to the project's real history. It isn't rebuilt automatically yet (no CI is configured — see [Known Limitations](#known-limitations--future-work)), so it reflects the state of the dbt project as of the last manual publish. To refresh it:
+It's generated with `dbt docs generate` and served as a static site from the `gh-pages` branch, kept separate from `main` so regenerating it doesn't add noise to the project's real history. It isn't rebuilt automatically yet (publishing isn't part of any workflow — see [Known Limitations](#known-limitations--future-work)), so it reflects the state of the dbt project as of the last manual publish. To refresh it:
 
 ```bash
 cd dbt_project
@@ -205,7 +205,7 @@ dbt_project:
 
 ### 5. Load the raw data into BigQuery
 
-`src/extract_api_data.py` is unchanged — it still writes locally (CSV + the DuckDB dev warehouse) regardless of which dbt target you use. A separate script loads the resulting CSV into BigQuery's `raw` dataset (created automatically if it doesn't exist):
+`src/extract_api_data.py` always writes locally (the CSV, plus the DuckDB dev warehouse unless run with `--skip-duckdb`), regardless of which dbt target you use — it has no BigQuery dependency. A separate script loads the resulting CSV into BigQuery's `raw` dataset (created automatically if it doesn't exist):
 
 ```bash
 python src/load_raw_to_bigquery.py
@@ -260,13 +260,15 @@ Each run:
 
 - **Live sidebar filters** (year range, country, phase, sponsor class) apply across all 4 pages as a real SQL `WHERE` on every query — not a client-side re-slice of a table fetched once. Pick "Phase III, Industry, 2015–2020" and every chart on every page reflects it.
 - **Cross-Factor Explorer** (4th page): pick any two factors and see completion rate across their intersection as a live heatmap — a view that literally cannot exist as a static screenshot, since it's one of dozens of possible combinations computed on demand.
-- Always querying whatever [Automated Weekly Extraction](#automated-weekly-extraction) most recently landed in BigQuery — Power BI needs a manual click and a Desktop install to check for new data (see [Known Limitations #6](#6-the-dashboards-data-refresh-is-manual-not-scheduled)); this is a public link, always current.
+- Always querying whatever [Automated Weekly Extraction](#automated-weekly-extraction) most recently landed in BigQuery — Power BI needs a manual click and a Desktop install to check for new data (see [Known Limitations #6](#6-the-power-bi-dashboards-data-refresh-is-manual-not-scheduled)); this is a public link, always current.
 
 **Why a second dashboard instead of just fixing Power BI's refresh:** the `.pbix` isn't in this repo (see [Known Limitations #7](#7-the-power-bi-semantic-model-relationships-dax-measures-isnt-checked-into-the-repo)) and Power BI Service scheduled refresh needs a Pro/PPU license this project doesn't have — both are real constraints, not solved by this app. What Streamlit *does* solve is having something publicly clickable and interactive at all: Power BI Desktop's file isn't shareable as a link the way this is, and its screenshots can't respond to a filter.
 
-**Stack:** [Plotly](https://plotly.com/python/) for charts (the same navy/mint pair as Power BI, validated with the [dataviz-skill](streamlit_app/theme.py) color checks for contrast and colorblind-safe separation), a dedicated `google-cloud-bigquery` client with `st.cache_data`/`st.cache_resource` (queries only re-run once an hour per distinct filter combination, not on every page view), each page's independent queries fired concurrently rather than one at a time (a cold page load went from ~9s to ~4s this way), and a deliberately minimal [`streamlit_app/requirements.txt`](streamlit_app/requirements.txt) separate from the root one (no dbt, no Jupyter — faster Streamlit Cloud builds).
+**Stack:** [Plotly](https://plotly.com/python/) for charts (the same navy/mint pair as Power BI, checked for contrast and colorblind-safe separation — see [`theme.py`](streamlit_app/theme.py)), a dedicated `google-cloud-bigquery` client with `st.cache_data`/`st.cache_resource` (queries only re-run once an hour per distinct filter combination, not on every page view), each page's independent queries fired concurrently rather than one at a time (a cold page load went from ~9s to ~4s this way), and a deliberately minimal [`streamlit_app/requirements.txt`](streamlit_app/requirements.txt) separate from the root one (no dbt, no Jupyter — faster Streamlit Cloud builds).
 
 **Deployed on [Streamlit Community Cloud](https://streamlit.io/cloud)** (free tier) — see [`streamlit_app/README.md`](streamlit_app/README.md) for local setup and secrets configuration.
+
+> **First visit:** the free tier puts idle apps to sleep. If you land on a "get this app back up" screen instead of the dashboard, click the button and wait for the app to restart — after that it responds normally.
 
 ---
 
@@ -387,6 +389,8 @@ Intervention type produces the largest range of any single factor in this analys
 
 ## Dashboard
 
+The three pages below are screenshots of the Power BI dashboard. For an interactive version you can filter and explore yourself, see the [live Streamlit app](#a-live-view-streamlit--bigquery).
+
 ### Overview
 
 ![Overview](assets/images/clinical_trials_analysis_overview.png)
@@ -407,7 +411,7 @@ This page decomposes completion and abandonment rates by trial phase, interventi
 
 ![Factors II](assets/images/clinical_trials_analysis_factors_ii.png)
 
-This page covers trial size (enrollment bands), therapeutic area (filtered to conditions with ≥1,000 trials, excluding healthy-volunteer studies), and geography. The donut chart highlights the geographic concentration of global clinical research: the United States accounts for 58% of all trials in the dataset.
+This page covers trial size (enrollment bands), therapeutic area (filtered to conditions with ≥1,000 trials, excluding healthy-volunteer studies), and geography. The donut chart highlights the geographic concentration of global clinical research: the United States accounts for 58% of the trial volume among the four largest countries shown, and 41% of all trials in the dataset.
 
 ---
 
@@ -431,7 +435,7 @@ Conditions containing "healthy" are excluded from the therapeutic area analysis 
 
 ### 4. dbt docs site is published manually, not on every change
 
-The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `gh-pages` by hand, so it can drift out of sync with `main` between publishes. No CI is configured yet.
+The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `gh-pages` by hand, so it can drift out of sync with `main` between publishes. The only workflow in the repo is the [weekly extraction](#automated-weekly-extraction), which doesn't touch the docs site.
 
 **Proposed solution:** a GitHub Action that runs `dbt docs generate` and publishes to `gh-pages` on every push to `main`.
 
@@ -439,7 +443,7 @@ The [dbt documentation site](#dbt-documentation) is regenerated and pushed to `g
 
 [Automated Weekly Extraction](#automated-weekly-extraction) covers the extraction itself incrementally, but `src/load_raw_to_bigquery.py` still does a full-refresh load (`WRITE_TRUNCATE`) of the merged CSV rather than loading only the changed rows — acceptable at ~140K rows, but every run re-uploads the entire table. Separately, the extraction's `LastUpdatePostDate` filter is only as precise as the day the API reports it at, so a study edited on the same calendar day as a run could in principle be picked up a day later than expected, or occasionally refetched twice at a day boundary — harmless given the upsert-by-`nct_id` merge, but not instantaneous.
 
-### 6. The dashboard's data refresh is manual, not scheduled
+### 6. The Power BI dashboard's data refresh is manual, not scheduled
 
 Power BI now connects live to BigQuery (see [Technical Architecture](#technical-architecture)), but Power BI Desktop only pulls new data when someone clicks Refresh — it never refreshes unattended. A genuinely scheduled refresh, in step with [Automated Weekly Extraction](#automated-weekly-extraction)'s weekly cadence, requires publishing the report to the Power BI Service with a Pro/PPU license, which isn't set up for this project. In the meantime, a manual refresh is a single click — down from re-exporting and reloading Parquet files, which is what this replaced. This specific limitation is what [the Streamlit dashboard](#a-live-view-streamlit--bigquery) is for: it has no refresh button because it doesn't need one — every page load queries BigQuery directly.
 
@@ -488,7 +492,7 @@ python src/extract_api_data.py
 
 This script connects to the ClinicalTrials.gov API v2 (no authentication required). On a first run (no saved state yet) it applies the full filter for Phases I–IV within a correctly-parenthesized date window `StartDate AND (Phase1 OR Phase2 OR Phase3 OR Phase4)` covering 2010–2024, writes results page-by-page to `data/raw/clinical_trials_raw.csv`, and loads them into `data/dwh_dev.duckdb`. On later runs it picks up the `LastUpdatePostDate` cutoff saved from the previous run and extracts incrementally instead — only studies that are new or changed since then, upserted into the existing CSV by `nct_id`. Pass `--full` to force a full extraction regardless of saved state. Separately from that, mid-run pagination is checkpointed: if a single run is interrupted, it resumes from the last saved page rather than restarting.
 
-Expected output on a full run: **137,556 trials** in `raw.raw_clinical_trials`. See [Automated Weekly Extraction](#automated-weekly-extraction) for how this runs unattended on a schedule.
+Expected output on a full run: roughly **137.6K trials** in `raw.raw_clinical_trials` (137,556 at the 2026-06-30 snapshot behind the findings below; the registry keeps adding studies, so a fresh run lands slightly higher). See [Automated Weekly Extraction](#automated-weekly-extraction) for how this runs unattended on a schedule.
 
 ### Step 2 — Run dbt transformations
 
@@ -520,6 +524,7 @@ Once connected, getting new data into the dashboard is a single click — **Home
 
 ```
 clinical_trials_analysis/
+├── .devcontainer/                    # dev container configuration
 ├── .github/
 │   ├── workflows/
 │   │   └── scheduled_extraction.yml  # weekly incremental extraction -> BigQuery -> dbt build
@@ -534,7 +539,8 @@ clinical_trials_analysis/
 │   ├── data.py                       # BigQuery client + filter-aware queries, cached
 │   ├── filters.py                    # sidebar filters shared across pages
 │   ├── theme.py                      # navy/mint palette, custom CSS, shared Plotly layout
-│   └── requirements.txt              # minimal, separate from the root one
+│   ├── requirements.txt              # minimal, separate from the root one
+│   └── README.md                     # local setup and secrets configuration
 ├── dbt_project/
 │   ├── models/
 │   │   ├── staging/         # stg_clinical_trials (+ date range validation)
@@ -542,21 +548,23 @@ clinical_trials_analysis/
 │   │   └── marts/           # fct + 7 dims + 4 bridges
 │   ├── seeds/
 │   │   └── condition_normalization.csv  # 3,771 raw→normalized mappings
-│   ├── tests/
-│   └── dbt_project.yml
+│   ├── tests/               # 2 singular data tests (duration, enrollment)
+│   ├── dbt_project.yml
+│   └── README.md            # layer structure (staging → intermediate → marts)
 ├── src/
-│   ├── extract_api_data.py       # API ingestion script (writes locally, always)
+│   ├── extract_api_data.py       # API ingestion: full or incremental, writes the raw CSV (+ local DuckDB)
 │   └── load_raw_to_bigquery.py   # optional: loads the raw CSV into BigQuery
 ├── notebooks/
 │   └── 01_exploration_SLA.ipynb  # Independent EDA & tie-out validation against DuckDB
 ├── sql/
-│   └── *.sql                 # Standalone ad-hoc queries against the marts (outside the dbt DAG)
+│   ├── *.sql                 # Standalone ad-hoc queries against the marts (outside the dbt DAG)
+│   └── README.md             # what each query answers and why it lives outside dbt
 ├── docs/
 │   └── SLA.md                # Business requirements, KPI definitions, analytical questions
 ├── assets/
 │   └── images/                # Dashboard screenshots
 ├── requirements.txt
-├── Makefile
+├── Makefile                          # shortcuts for every step in "How to Reproduce"
 └── README.md
 ```
 
