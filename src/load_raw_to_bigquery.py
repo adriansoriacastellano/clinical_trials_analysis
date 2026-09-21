@@ -136,5 +136,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        logger.exception("La carga en BigQuery fallo.")
+        logger.exception("BigQuery load failed.")
         sys.exit(1)
