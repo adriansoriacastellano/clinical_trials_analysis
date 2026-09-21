@@ -411,7 +411,7 @@ This page decomposes completion and abandonment rates by trial phase, interventi
 
 ![Factors II](assets/images/clinical_trials_analysis_factors_ii.png)
 
-This page covers trial size (enrollment bands), therapeutic area (filtered to conditions with ≥1,000 trials, excluding healthy-volunteer studies), and geography. The donut chart highlights the geographic concentration of global clinical research: the United States accounts for 58% of the trial volume among the four largest countries shown, and 41% of all trials in the dataset.
+This page covers trial size (enrollment bands), therapeutic area (filtered to conditions with ≥1,000 trials, excluding healthy-volunteer studies), and geography. The donut chart highlights the geographic concentration of global clinical research: among the four countries with the highest trial volume, the United States alone accounts for 58% of trials.
 
 ---
 
