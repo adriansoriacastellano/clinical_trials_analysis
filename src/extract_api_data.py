@@ -34,23 +34,23 @@ logger = logging.getLogger(__name__)
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Extrae estudios de ClinicalTrials.gov API v2."
+        description="Extracts studies from the ClinicalTrials.gov API v2."
     )
     parser.add_argument(
         "--full",
         action="store_true",
         help=(
-            "Fuerza una extraccion completa (2010-2024, fases I-IV), ignorando "
-            "el estado de la ultima extraccion incremental."
+            "Force a full extraction (2010-2024, Phases I-IV), ignoring "
+            "the state saved by the last incremental extraction."
         ),
     )
     parser.add_argument(
         "--skip-duckdb",
         action="store_true",
         help=(
-            "No reconstruir data/dwh_dev.duckdb al final. Pensado para el workflow "
-            "de GitHub Actions, donde el CSV solo se usa para cargar a BigQuery y "
-            "nadie lee el DuckDB del runner efimero."
+            "Do not rebuild data/dwh_dev.duckdb at the end. Intended for the GitHub "
+            "Actions workflow, where the CSV is only used to load into BigQuery and "
+            "nobody reads the ephemeral runner's DuckDB."
         ),
     )
     return parser.parse_args()
@@ -112,12 +112,12 @@ def fetch_page(params):
         except requests.RequestException as exc:
             last_exc = exc
             logger.warning(
-                "Intento %d/%d fallido al consultar la API: %s", attempt, MAX_RETRIES, exc
+                "Attempt %d/%d to query the API failed: %s", attempt, MAX_RETRIES, exc
             )
             if attempt < MAX_RETRIES:
                 time.sleep(RETRY_BACKOFF_SECONDS * attempt)
     raise RuntimeError(
-        f"No se pudo obtener la pagina tras {MAX_RETRIES} intentos"
+        f"Could not fetch the page after {MAX_RETRIES} attempts"
     ) from last_exc
 
 
@@ -289,11 +289,11 @@ def main():
     since_date = state["last_update_post_date"] if state else None
 
     logger.info(
-        "Iniciando extraccion (%s) de ClinicalTrials.gov API v2 (2010-2024, fases I-IV)...",
+        "Starting %s extraction from ClinicalTrials.gov API v2 (2010-2024, Phases I-IV)...",
         mode,
     )
     if mode == "incremental":
-        logger.info("Filtrando por LastUpdatePostDate >= %s", since_date)
+        logger.info("Filtering by LastUpdatePostDate >= %s", since_date)
 
     checkpoint = load_checkpoint()
     if checkpoint and checkpoint.get("mode") == mode:
@@ -301,13 +301,13 @@ def main():
         page = checkpoint["page"]
         total_processed = checkpoint["total_processed"]
         logger.info(
-            "Reanudando checkpoint (%s): pagina %d, %d estudios ya procesados.",
+            "Resuming from checkpoint (%s): page %d, %d studies already processed.",
             mode, page, total_processed,
         )
     else:
         if checkpoint:
             logger.warning(
-                "Checkpoint encontrado de un modo distinto (%s); se descarta.",
+                "Checkpoint found for a different mode (%s); discarding it.",
                 checkpoint.get("mode"),
             )
         next_page_token = None
@@ -332,7 +332,7 @@ def main():
 
         if total_count is None:
             total_count = data.get("totalCount", 0)
-            logger.info("Total de estudios a extraer: %d", total_count)
+            logger.info("Total studies to extract: %d", total_count)
 
         page_studies = data.get("studies", [])
         page += 1
@@ -358,7 +358,7 @@ def main():
 
         next_page_token = data.get("nextPageToken")
         logger.info(
-            "Pagina %d: %d extraidos | Procesados: %d | Total esperado: %s",
+            "Page %d: %d extracted | Processed: %d | Expected total: %s",
             page, len(page_studies), total_processed, total_count,
         )
 
@@ -366,7 +366,7 @@ def main():
             save_checkpoint(next_page_token or "", page, total_processed, mode)
             last_checkpoint_page = page
             logger.info(
-                "  -> Checkpoint guardado (pagina %d, token: %s)",
+                "  -> Checkpoint saved (page %d, token: %s)",
                 page, str(next_page_token)[:30] if next_page_token else "FINAL",
             )
 
@@ -375,31 +375,31 @@ def main():
 
         time.sleep(0.5)
 
-    logger.info("Extraccion completada. Total procesado: %d estudios.", total_processed)
+    logger.info("Extraction complete. Total processed: %d studies.", total_processed)
 
     if mode == "incremental":
         merged_count = merge_into_csv(incremental_rows)
         logger.info(
-            "Merge incremental: %d estudios nuevos/actualizados. CSV con %d filas totales.",
+            "Incremental merge: %d new/updated studies. CSV now has %d total rows.",
             len(incremental_rows), merged_count,
         )
 
     if CHECKPOINT_FILE.exists():
         CHECKPOINT_FILE.unlink()
-        logger.info("Checkpoint eliminado.")
+        logger.info("Checkpoint deleted.")
 
     if max_last_update:
         save_state(max_last_update)
         logger.info(
-            "Estado guardado: la proxima extraccion incremental partira de LastUpdatePostDate >= %s",
+            "State saved: the next incremental extraction will start from LastUpdatePostDate >= %s",
             max_last_update,
         )
 
     if args.skip_duckdb:
-        logger.info("--skip-duckdb: omitiendo la reconstruccion de %s.", DB_PATH)
+        logger.info("--skip-duckdb: skipping the rebuild of %s.", DB_PATH)
         return
 
-    logger.info("Cargando datos en DuckDB desde %s...", OUTPUT_CSV)
+    logger.info("Loading data into DuckDB from %s...", OUTPUT_CSV)
     import duckdb
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(DB_PATH))
@@ -409,7 +409,7 @@ def main():
         SELECT * FROM read_csv_auto('{OUTPUT_CSV}')
     """)
     con.close()
-    logger.info("Carga en DuckDB completada exitosamente.")
+    logger.info("DuckDB load completed successfully.")
 
 
 if __name__ == "__main__":
@@ -420,5 +420,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        logger.exception("La extraccion fallo.")
+        logger.exception("Extraction failed.")
         sys.exit(1)
